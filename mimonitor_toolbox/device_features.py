@@ -1057,25 +1057,30 @@ class DeviceFeaturesMixin:
         if not getattr(self, "adb_connected", False) or not getattr(self, "adb", None):
             return
 
-        def operation():
-            return self.adb.shell("cat /proc/cmdline")
+        def do_detect():
+            try:
+                if hasattr(self.adb, "ensure_connected"):
+                    self.adb.ensure_connected()
+                cmdline_text = self.adb.shell("cat /proc/cmdline")
+                match = re.search(r"androidboot\.mi\.panel_size=(\d+)", str(cmdline_text or ""))
+                panel_size = match.group(1) if match else None
+                if panel_size == "32":
+                    model = "Redmi G Pro 32U"
+                elif panel_size == "27":
+                    model = "Redmi G Pro 27U"
+                else:
+                    return
 
-        def on_success(res):
-            cmdline_text = str(res or "")
-            match = re.search(r"androidboot\.mi\.panel_size=(\d+)", cmdline_text)
-            panel_size = match.group(1) if match else None
-            if panel_size == "32":
-                model = "Redmi G Pro 32U"
-            elif panel_size == "27":
-                model = "Redmi G Pro 27U"
-            else:
-                return
-            from .core import save_detected_model
-            save_detected_model(model)
-            if hasattr(self, "_update_app_model_title"):
-                self._update_app_model_title(model)
+                from .core import save_detected_model
+                save_detected_model(model)
+                if hasattr(self, "model_detected_signal"):
+                    self.model_detected_signal.emit(model)
+                elif hasattr(self, "_update_app_model_title"):
+                    self._update_app_model_title(model)
+            except Exception as exc:
+                self.log(f"机型检测异常: {exc}")
 
-        self._run_adb_action("检测显示器机型", operation, on_success=on_success)
+        async_run(do_detect)
 
     def _guardian_shell(self, cmd):
         return self.adb.shell(cmd).strip().replace("\r", "")

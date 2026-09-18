@@ -158,14 +158,15 @@ class TestModelDetectionAndDynamicTitle(unittest.TestCase):
                 shell=lambda cmd: "console=ttyS0 androidboot.mi.panel_size=32 init=/init\n",
             ),
             adb_connected=True,
-            _run_adb_action=lambda label, op, on_success=None, on_failure=None: on_success(op()),
+            model_detected_signal=SimpleNamespace(emit=mock.MagicMock()),
             _update_app_model_title=mock.MagicMock(),
         )
 
-        with mock.patch("mimonitor_toolbox.core.save_detected_model") as mock_save:
+        with mock.patch("mimonitor_toolbox.core.save_detected_model") as mock_save, \
+             mock.patch("mimonitor_toolbox.device_features.async_run", side_effect=lambda fn: fn()):
             device_features.DeviceFeaturesMixin._detect_device_model(host)
             mock_save.assert_called_once_with("Redmi G Pro 32U")
-            host._update_app_model_title.assert_called_once_with("Redmi G Pro 32U")
+            host.model_detected_signal.emit.assert_called_once_with("Redmi G Pro 32U")
 
     def test_detect_device_model_parses_27u_panel(self):
         from mimonitor_toolbox import device_features
@@ -176,14 +177,15 @@ class TestModelDetectionAndDynamicTitle(unittest.TestCase):
                 shell=lambda cmd: "console=ttyS0 androidboot.mi.panel_size=27 init=/init\n",
             ),
             adb_connected=True,
-            _run_adb_action=lambda label, op, on_success=None, on_failure=None: on_success(op()),
+            model_detected_signal=SimpleNamespace(emit=mock.MagicMock()),
             _update_app_model_title=mock.MagicMock(),
         )
 
-        with mock.patch("mimonitor_toolbox.core.save_detected_model") as mock_save:
+        with mock.patch("mimonitor_toolbox.core.save_detected_model") as mock_save, \
+             mock.patch("mimonitor_toolbox.device_features.async_run", side_effect=lambda fn: fn()):
             device_features.DeviceFeaturesMixin._detect_device_model(host)
             mock_save.assert_called_once_with("Redmi G Pro 27U")
-            host._update_app_model_title.assert_called_once_with("Redmi G Pro 27U")
+            host.model_detected_signal.emit.assert_called_once_with("Redmi G Pro 27U")
 
     def test_update_app_model_title_updates_window_and_tray(self):
         from mimonitor_toolbox.main_window import App

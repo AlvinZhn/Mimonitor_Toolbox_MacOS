@@ -17,7 +17,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from PyQt6.QtCore import QObject, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
 from mimonitor_toolbox.dashboard import DashboardInterface, PresetApplyWorker
@@ -111,6 +111,11 @@ class TestPhase26MacOSWindowTrafficLights(unittest.TestCase):
                 margins = window.titleBar.hBoxLayout.contentsMargins()
                 self.assertGreaterEqual(margins.left(), 70)
 
+        # 验证 macOS 原生交通灯回归左上角（x <= 20），而非右侧（size.width() - 75）
+        rect = window.systemTitleBarRect(QSize(1000, 48))
+        self.assertLess(rect.x(), 50)
+        self.assertEqual(rect.width(), 75)
+
         window._cleanup_done = True
         window.deleteLater()
         _qt_app.processEvents()
@@ -133,14 +138,15 @@ class TestPhase26ModelDetectionAndCmdlineRegex(unittest.TestCase):
                 shell=lambda cmd: raw_cmdline,
             ),
             adb_connected=True,
-            _run_adb_action=lambda label, op, on_success=None, on_failure=None: on_success(op()),
+            model_detected_signal=SimpleNamespace(emit=mock.MagicMock()),
             _update_app_model_title=mock.MagicMock(),
         )
 
-        with mock.patch("mimonitor_toolbox.core.save_detected_model") as mock_save:
+        with mock.patch("mimonitor_toolbox.core.save_detected_model") as mock_save, \
+             mock.patch("mimonitor_toolbox.device_features.async_run", side_effect=lambda fn: fn()):
             device_features.DeviceFeaturesMixin._detect_device_model(host)
             mock_save.assert_called_once_with("Redmi G Pro 32U")
-            host._update_app_model_title.assert_called_once_with("Redmi G Pro 32U")
+            host.model_detected_signal.emit.assert_called_once_with("Redmi G Pro 32U")
 
     def test_detect_27u_from_cmdline(self):
         from mimonitor_toolbox import device_features
@@ -155,14 +161,15 @@ class TestPhase26ModelDetectionAndCmdlineRegex(unittest.TestCase):
                 shell=lambda cmd: raw_cmdline,
             ),
             adb_connected=True,
-            _run_adb_action=lambda label, op, on_success=None, on_failure=None: on_success(op()),
+            model_detected_signal=SimpleNamespace(emit=mock.MagicMock()),
             _update_app_model_title=mock.MagicMock(),
         )
 
-        with mock.patch("mimonitor_toolbox.core.save_detected_model") as mock_save:
+        with mock.patch("mimonitor_toolbox.core.save_detected_model") as mock_save, \
+             mock.patch("mimonitor_toolbox.device_features.async_run", side_effect=lambda fn: fn()):
             device_features.DeviceFeaturesMixin._detect_device_model(host)
             mock_save.assert_called_once_with("Redmi G Pro 27U")
-            host._update_app_model_title.assert_called_once_with("Redmi G Pro 27U")
+            host.model_detected_signal.emit.assert_called_once_with("Redmi G Pro 27U")
 
     def test_app_title_exact_formatting(self):
         from mimonitor_toolbox.main_window import App

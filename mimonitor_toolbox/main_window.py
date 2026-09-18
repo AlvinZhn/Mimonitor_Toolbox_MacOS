@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QRect, QSize, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMenu, QSystemTrayIcon
 from qfluentwidgets import FluentWindow, MessageBox
@@ -76,6 +76,13 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
     connection_recovery_requested = pyqtSignal(int, str, str)
     reconnect_target_probe_finished = pyqtSignal(int, bool)
     resume_discovery_finished = pyqtSignal(int, list, str)
+    model_detected_signal = pyqtSignal(str)
+
+    def systemTitleBarRect(self, size: QSize) -> QRect:
+        """macOS 原生红黄绿交通灯置于左上角标准位置。"""
+        if sys.platform == "darwin":
+            return QRect(12, 0 if self.isFullScreen() else 0, 75, size.height())
+        return super().systemTitleBarRect(size)
 
     def __init__(self):
         super().__init__()
@@ -120,6 +127,7 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
         self.connection_recovery_requested.connect(self._handle_connection_recovery_request)
         self.reconnect_target_probe_finished.connect(self._finish_reconnect_target_probe)
         self.resume_discovery_finished.connect(self._finish_resume_discovery)
+        self.model_detected_signal.connect(self._update_app_model_title)
         set_async_error_handler(self._report_background_error)
 
         # Setup layout and components
@@ -130,6 +138,8 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
         if sys.platform == "darwin":
             if hasattr(self, "setSystemTitleBarButtonVisible"):
                 self.setSystemTitleBarButtonVisible(True)
+            if hasattr(self, "_updateSystemButtonRect"):
+                self._updateSystemButtonRect()
             if hasattr(self, "titleBar") and self.titleBar is not None:
                 if hasattr(self.titleBar, "minBtn") and self.titleBar.minBtn:
                     self.titleBar.minBtn.hide()
@@ -147,11 +157,11 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
                             child.widget().hide()
                             child.widget().setParent(None)
                 if hasattr(self.titleBar, "hBoxLayout") and self.titleBar.hBoxLayout:
-                    self.titleBar.hBoxLayout.setContentsMargins(75, 0, 0, 0)
+                    self.titleBar.hBoxLayout.setContentsMargins(85, 0, 0, 0)
 
             if hasattr(self, "navigationInterface") and self.navigationInterface is not None:
                 if hasattr(self.navigationInterface, "panel") and hasattr(self.navigationInterface.panel, "topLayout"):
-                    self.navigationInterface.panel.topLayout.setContentsMargins(4, 32, 4, 0)
+                    self.navigationInterface.panel.topLayout.setContentsMargins(4, 40, 4, 0)
 
         if hasattr(self, "dashboard_page"):
             self.dashboard_page.preset_applied.connect(self._sync_ui_from_preset)
@@ -260,6 +270,8 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
         if sys.platform == "darwin":
             if hasattr(self, "setSystemTitleBarButtonVisible"):
                 self.setSystemTitleBarButtonVisible(True)
+            if hasattr(self, "_updateSystemButtonRect"):
+                self._updateSystemButtonRect()
             if hasattr(self, "titleBar") and self.titleBar is not None:
                 if hasattr(self.titleBar, "minBtn") and self.titleBar.minBtn:
                     self.titleBar.minBtn.hide()
@@ -780,14 +792,14 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
                 page = self.stackedWidget.currentWidget()
                 if page:
                     self._on_page_changed(self.stackedWidget.currentIndex())
-                # 连接后预加载画面页与游戏页数据（无论当前停在哪一页），切换过去时无需再等读取
+                # 连接后立即触发机型探测（毫秒级识别），并预加载画面页与游戏页
+                QTimer.singleShot(100, self._detect_device_model)
                 self._refresh_pages(("picturePage", "gamePage"), delay_ms=800)
                 # 检测 4K 状态
                 QTimer.singleShot(1500, self._check_4k_state)
                 # 首次连接后同步 ADB 保活守护状态，工具页卡片不需要再手动点检测
                 QTimer.singleShot(1800, self._check_guardian_status)
                 QTimer.singleShot(2200, lambda: self._poll_hdr_memory_state("connected"))
-                QTimer.singleShot(2500, self._detect_device_model)
         
         if "扫描中" in text:
             status_suffix = "正在扫描内网..."
@@ -802,7 +814,9 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
             status_suffix = "连接中"
             self.status_label.setStyleSheet("color: #b85c00; font-weight: bold; font-size: 14px;")
         elif "已连接" in text:
-            status_suffix = f"已连接 ({text.replace('已连接: ', '')})"
+            ip = str(getattr(getattr(self, "adb", None), "ip", "") or "").strip()
+            conn_target = ip or text.replace("已连接: ", "").strip()
+            status_suffix = f"已连接 ({conn_target})" if conn_target else "已连接"
             self.status_label.setStyleSheet("color: #107c41; font-weight: bold; font-size: 14px;")
         else:
             status_suffix = text
