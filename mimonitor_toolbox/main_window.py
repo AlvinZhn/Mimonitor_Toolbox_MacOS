@@ -28,6 +28,7 @@ from .adb import (
 from .core import (
     ADJUSTABLE_HOTKEY_PARAMS,
     HOTKEY_EXTRA_VK,
+    get_cached_model_title,
     get_log_dir,
     load_settings,
     update_settings,
@@ -97,7 +98,8 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
         self._connection_in_progress = False
 
         # Window properties
-        self.setWindowTitle("红米 G Pro 27U Toolbox")
+        self.current_model_title = get_cached_model_title()
+        self.setWindowTitle(f"{self.current_model_title} - 未连接")
         self.resize(1000, 750)
 
         # Connect signals
@@ -123,6 +125,23 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
         # Setup layout and components
         self.osd = OsdHud(self)
         self.setup_ui()
+
+        # macOS 专属原生视觉与人机规范适配
+        if sys.platform == "darwin":
+            if hasattr(self, "titleBar") and self.titleBar is not None:
+                if hasattr(self.titleBar, "minBtn") and self.titleBar.minBtn:
+                    self.titleBar.minBtn.hide()
+                if hasattr(self.titleBar, "maxBtn") and self.titleBar.maxBtn:
+                    self.titleBar.maxBtn.hide()
+                if hasattr(self.titleBar, "closeBtn") and self.titleBar.closeBtn:
+                    self.titleBar.closeBtn.hide()
+                if hasattr(self.titleBar, "hBoxLayout") and self.titleBar.hBoxLayout:
+                    self.titleBar.hBoxLayout.setContentsMargins(70, 0, 0, 0)
+
+            if hasattr(self, "navigationInterface") and self.navigationInterface is not None:
+                if hasattr(self.navigationInterface, "panel") and hasattr(self.navigationInterface.panel, "topLayout"):
+                    self.navigationInterface.panel.topLayout.setContentsMargins(4, 30, 4, 0)
+
         if hasattr(self, "dashboard_page"):
             self.dashboard_page.preset_applied.connect(self._sync_ui_from_preset)
             self.switchTo(self.dashboard_page)
@@ -744,6 +763,7 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
                 # 首次连接后同步 ADB 保活守护状态，工具页卡片不需要再手动点检测
                 QTimer.singleShot(1800, self._check_guardian_status)
                 QTimer.singleShot(2200, lambda: self._poll_hdr_memory_state("connected"))
+                QTimer.singleShot(2500, self._detect_device_model)
         
         if "扫描中" in text:
             status_suffix = "正在扫描内网..."
@@ -764,13 +784,33 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
             status_suffix = text
             self.status_label.setStyleSheet("color: #107c41; font-weight: bold; font-size: 14px;")
             
-        self.setWindowTitle(f"红米 G Pro 27U Toolbox - {status_suffix}")
+        model_title = getattr(self, "current_model_title", None) or get_cached_model_title()
+        self.setWindowTitle(f"{model_title} - {status_suffix}")
         if hasattr(self, "dashboard_page"):
             self.dashboard_page.sync_external_state(
                 current_settings=self._gather_current_settings(),
                 connected=getattr(self, "adb_connected", False),
                 ip=str(getattr(getattr(self, "adb", None), "ip", "") or ""),
             )
+
+    def _update_app_model_title(self, model: str):
+        """根据识别出的机型动态更新窗口标题、托盘气泡与主页标题。"""
+        self.detected_model = model
+        if "32" in str(model):
+            title_text = "红米 G Pro 32U Toolbox"
+        elif "27" in str(model):
+            title_text = "红米 G Pro 27U Toolbox"
+        else:
+            title_text = f"{model} Toolbox"
+        self.current_model_title = title_text
+
+        status_suffix = "已连接" if getattr(self, "adb_connected", False) else "未连接"
+        self.setWindowTitle(f"{title_text} - {status_suffix}")
+        if hasattr(self, "tray_icon") and self.tray_icon:
+            self.tray_icon.setToolTip(title_text)
+        if hasattr(self, "home_title_label") and self.home_title_label:
+            self.home_title_label.setText(title_text)
+        self.log(f"已动态识别当前显示器机型: {model}")
 
     def _gather_current_settings(self) -> dict:
         """汇聚当前从显示器读取到或界面所呈现的核心画质参数。"""

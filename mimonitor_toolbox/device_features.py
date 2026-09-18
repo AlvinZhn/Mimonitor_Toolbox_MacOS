@@ -1004,7 +1004,7 @@ class DeviceFeaturesMixin:
         if sys.platform == "win32":
             subprocess.Popen(f"start cmd /k {shell_cmd}", shell=True)
         elif sys.platform == "darwin":
-            subprocess.Popen(["osascript", "-e", f'tell application "Terminal" to do script "{shell_cmd}"'])
+            subprocess.Popen(["osascript", "-e", f'tell application "Terminal" to activate do script "{shell_cmd}"'])
         else:
             launched = False
             for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"]:
@@ -1019,23 +1019,61 @@ class DeviceFeaturesMixin:
                 self._show_message_box("error", "错误", f"未找到可用的终端模拟器，请手动在终端中运行: {shell_cmd}")
 
     def _open_adb_cmd(self):
-        if sys.platform != "win32":
-            self._show_message_box("error", "错误", "ADB CMD 仅支持 Windows。")
-            return
         self.log("正在打开 ADB CMD...")
         adb_path = os.path.abspath(ADB)
-        command = (
-            "title Mimonitor ADB CMD & "
-            f"doskey adb=adb.exe -P {ADB_SERVER_PORT} $*"
-        )
-        try:
-            subprocess.Popen(
-                ["cmd.exe", "/k", command],
-                cwd=os.path.dirname(adb_path),
-                creationflags=CREATE_NEW_CONSOLE,
+        adb_dir = os.path.dirname(adb_path)
+        if sys.platform == "win32":
+            command = (
+                "title Mimonitor ADB CMD & "
+                f"doskey adb=adb.exe -P {ADB_SERVER_PORT} $*"
             )
-        except OSError as exc:
-            self._show_message_box("error", "错误", f"无法打开 ADB CMD：{exc}")
+            try:
+                subprocess.Popen(
+                    ["cmd.exe", "/k", command],
+                    cwd=adb_dir,
+                    creationflags=CREATE_NEW_CONSOLE,
+                )
+            except OSError as exc:
+                self._show_message_box("error", "错误", f"无法打开 ADB CMD：{exc}")
+        elif sys.platform == "darwin":
+            try:
+                script = (
+                    f'tell application "Terminal" to activate do script '
+                    f'"export PATH=\\"{adb_dir}\\":$PATH; '
+                    f'alias adb=\\"{adb_path} -P {ADB_SERVER_PORT}\\"; '
+                    f'echo \\"=== Mimonitor ADB 命令行终端 (macOS) ===\\"; '
+                    f'echo \\"ADB 程序: {adb_path}\\"; '
+                    f'cd ~"'
+                )
+                subprocess.Popen(["osascript", "-e", script])
+            except OSError as exc:
+                self._show_message_box("error", "错误", f"无法打开 Terminal 终端：{exc}")
+        else:
+            self._show_message_box("error", "错误", "当前操作系统暂不支持自动调起终端。")
+
+    def _detect_device_model(self):
+        """联机成功后后台通过 ADB 探测面板尺寸，动态识别 27U / 32U 机型。"""
+        if not getattr(self, "adb_connected", False) or not getattr(self, "adb", None):
+            return
+
+        def operation():
+            cmd = "cat /proc/cmdline | grep -o 'androidboot.mi.panel_size=[0-9]*' | cut -d= -f2"
+            return self.adb.shell(cmd).strip().replace("\r", "")
+
+        def on_success(res):
+            res_str = str(res or "").strip()
+            if "32" in res_str:
+                model = "Redmi G Pro 32U"
+            elif "27" in res_str:
+                model = "Redmi G Pro 27U"
+            else:
+                return
+            from .core import save_detected_model
+            save_detected_model(model)
+            if hasattr(self, "_update_app_model_title"):
+                self._update_app_model_title(model)
+
+        self._run_adb_action("检测显示器机型", operation, on_success=on_success)
 
     def _guardian_shell(self, cmd):
         return self.adb.shell(cmd).strip().replace("\r", "")

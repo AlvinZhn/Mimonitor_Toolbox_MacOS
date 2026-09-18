@@ -45,6 +45,25 @@ from .platform_adapter import get_platform_adapter
 from .presets.manager import PresetManager, PresetProfile, get_preset_manager
 
 
+class TagBadge(QLabel):
+    """高对比度参数药丸标签，支持半透明浅底与高亮字体。"""
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setStyleSheet(
+            """
+            TagBadge, QLabel {
+                background-color: rgba(255, 255, 255, 0.12);
+                color: #FFFFFF;
+                border-radius: 4px;
+                padding: 2px 8px;
+                font-size: 11px;
+                font-weight: 500;
+            }
+            """
+        )
+
+
 class PresetCard(ElevatedCardWidget):
     """大卡片展示单个情景模式，支持激活态边框高亮、参数标签与应用反馈。"""
 
@@ -138,26 +157,15 @@ class PresetCard(ElevatedCardWidget):
         bottom_row.addWidget(self.status_tag, 1)
 
         self.apply_btn = PrimaryPushButton(FIF.ACCEPT, "一键应用", self)
-        self.apply_btn.setFixedWidth(100)
+        self.apply_btn.setMinimumWidth(102)
         self.apply_btn.clicked.connect(self._on_apply_clicked)
         bottom_row.addWidget(self.apply_btn)
 
         self.main_layout.addLayout(bottom_row)
         self._update_style()
 
-    def _make_chip(self, text: str) -> QLabel:
-        lbl = QLabel(text, self)
-        lbl.setStyleSheet(
-            """
-            QLabel {
-                background-color: rgba(120, 120, 120, 0.15);
-                border-radius: 4px;
-                padding: 2px 6px;
-                font-size: 11px;
-            }
-            """
-        )
-        return lbl
+    def _make_chip(self, text: str) -> "TagBadge":
+        return TagBadge(text, self)
 
     def _on_apply_clicked(self):
         if not self._is_loading:

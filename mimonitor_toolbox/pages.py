@@ -49,6 +49,7 @@ from .core import (
     HOTKEY_KEYS,
     HOTKEY_MODIFIERS,
     bundled_resource_path,
+    get_cached_model_title,
     load_settings,
     update_settings,
 )
@@ -99,12 +100,12 @@ class PagesMixin:
         layout.setSpacing(20)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        title = TitleLabel("红米 G Pro 27U Toolbox", container)
-        title_font = title.font()
+        self.home_title_label = TitleLabel(get_cached_model_title(), container)
+        title_font = self.home_title_label.font()
         title_font.setPixelSize(28)
         title_font.setBold(True)
-        title.setFont(title_font)
-        layout.addWidget(title)
+        self.home_title_label.setFont(title_font)
+        layout.addWidget(self.home_title_label)
 
         subtitle = BodyLabel("通过无线 ADB 连接并调优您的 MiniLED 旗舰显示器", container)
         sub_font = subtitle.font()
@@ -555,7 +556,7 @@ class PagesMixin:
         
         self._add_icon_title(c1_lay, FIF.COMMAND_PROMPT, "ADB 命令行工具", card1)
         
-        lbl_c1_desc = BodyLabel("打开使用本软件独立 ADB 服务的 Windows 命令行，或直接进入当前显示器的交互式 ADB Shell。", card1)
+        lbl_c1_desc = BodyLabel("打开使用本软件独立 ADB 服务的命令行终端，或直接进入当前显示器的交互式 ADB Shell。", card1)
         lbl_c1_desc.setWordWrap(True)
 
         c1_lay.addWidget(lbl_c1_desc)
@@ -1017,10 +1018,10 @@ class PagesMixin:
 
         # High-End Remote Controller body (Simulated Hardware)
         remote_card = SimpleCardWidget(main_frame)
-        remote_card.setFixedSize(300, 520)
+        remote_card.setFixedSize(320, 530)
         
         rc_layout = QVBoxLayout(remote_card)
-        rc_layout.setContentsMargins(25, 25, 25, 25)
+        rc_layout.setContentsMargins(18, 25, 18, 25)
         rc_layout.setSpacing(18)
         rc_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -1169,8 +1170,7 @@ class PagesMixin:
         btn_vol_up = PushButton("🔊 音量+", remote_card)
 
         for btn, key in [(btn_vol_down, "KEYCODE_VOLUME_DOWN"), (btn_mute, "KEYCODE_VOLUME_MUTE"), (btn_vol_up, "KEYCODE_VOLUME_UP")]:
-            btn.setFixedSize(74, 34)
-            
+            btn.setFixedSize(86, 34)
             btn.clicked.connect(lambda checked=False, k=key: self._key(k))
             vol_layout.addWidget(btn)
 

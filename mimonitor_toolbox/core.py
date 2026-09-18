@@ -38,6 +38,7 @@ def _load_settings_unlocked():
         "local_dimming_toggle_last_value": 3,
         "freesync_mode_memory_enabled": False,
         "freesync_previous_mode": None,
+        "detected_model": None,
     }
     path = get_settings_path()
     data = {}
@@ -59,6 +60,24 @@ def _load_settings_unlocked():
         "hdr": memory.get("hdr"),
     }
     return merged
+
+DEFAULT_APP_TITLE = "红米 G Pro 旗舰显示器控制台 (27U/32U)"
+
+def get_cached_model_title() -> str:
+    """获取本地缓存的机型标题。若已识别则显示具体机型，若未识别则返回默认全局综合标题。"""
+    settings = load_settings()
+    model = settings.get("detected_model")
+    if model:
+        if "32" in str(model):
+            return "红米 G Pro 32U Toolbox"
+        elif "27" in str(model):
+            return "红米 G Pro 27U Toolbox"
+        return f"{model} Toolbox"
+    return DEFAULT_APP_TITLE
+
+def save_detected_model(model_name: str) -> None:
+    """持久化保存探测到的机型名称。"""
+    update_settings({"detected_model": str(model_name).strip()})
 
 def load_settings():
     with _settings_lock:

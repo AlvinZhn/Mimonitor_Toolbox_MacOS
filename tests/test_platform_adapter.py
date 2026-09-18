@@ -174,12 +174,26 @@ class MacOSAdapterAdbPathTests(unittest.TestCase):
                 # 验证已自动添加执行权限 (chmod +x)
                 self.assertTrue(os.access(fake_adb, os.X_OK))
 
+    def test_prefers_user_cached_adb_when_present(self):
+        user_adb = os.path.expanduser("~/.mimonitor_toolbox/bin/adb")
+        with mock.patch("shutil.which", return_value=None), mock.patch(
+            "mimonitor_toolbox.core.bundled_resource_path",
+            return_value=None,
+        ), mock.patch("os.path.exists", side_effect=lambda p: p == user_adb), mock.patch(
+            "os.access", return_value=True
+        ):
+            self.assertEqual(self.adapter.get_bundled_adb_path(), user_adb)
+
     def test_returns_plain_adb_when_resource_does_not_exist(self):
         with mock.patch("shutil.which", return_value=None), mock.patch(
             "mimonitor_toolbox.core.bundled_resource_path",
             return_value=None,
         ), mock.patch(
             "os.path.exists",
+            return_value=False,
+        ), mock.patch.object(
+            self.adapter,
+            "_bootstrap_adb_binary",
             return_value=False,
         ):
             self.assertEqual(self.adapter.get_bundled_adb_path(), "adb")

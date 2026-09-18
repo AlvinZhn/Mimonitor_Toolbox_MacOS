@@ -281,11 +281,43 @@ class MacOSAdapter(BasePlatformAdapter):
 
         return records
 
+    @staticmethod
+    def _bootstrap_adb_binary(target_path: str) -> bool:
+        """从 Google 官方静态源静默下载 darwin 版 platform-tools 并解压 adb 二进制。"""
+        import io
+        import urllib.request
+        import zipfile
+
+        url = "https://dl.google.com/android/repository/platform-tools-latest-darwin.zip"
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = resp.read()
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                adb_inner_names = [n for n in zf.namelist() if n.endswith("/adb") or n == "adb"]
+                if not adb_inner_names:
+                    return False
+                adb_bytes = zf.read(adb_inner_names[0])
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                with open(target_path, "wb") as f:
+                    f.write(adb_bytes)
+                os.chmod(target_path, 0o755)
+                return True
+        except Exception:
+            return False
+
     def get_bundled_adb_path(self) -> str:
         """获取适配 macOS 的 ADB 执行路径。
 
-        优先检测系统环境 PATH 中的 adb；
-        若无，指向 assets/runtime/darwin/adb，并在返回前确保具有执行权限 (chmod +x)。
+        流水线：
+        1. 优先检测系统环境 shutil.which('adb')；
+        2. 其次查项目内置资源 assets/runtime/darwin/adb；
+        3. 再次查用户缓存目录 ~/.mimonitor_toolbox/bin/adb；
+        4. 若上述三者皆无，静默从 Google 官方静态源自举下载并赋予执行权限；
+        5. 兜底返回 "adb"。
         """
         from ..core import bundled_resource_path, get_app_base_dir
 
@@ -299,7 +331,6 @@ class MacOSAdapter(BasePlatformAdapter):
         if not darwin_adb:
             darwin_adb = os.path.join(get_app_base_dir(), "assets", "runtime", "darwin", "adb")
 
-        # 3. 确保具备可执行权限 (chmod +x)
         if os.path.exists(darwin_adb):
             if not os.access(darwin_adb, os.X_OK):
                 try:
@@ -309,5 +340,22 @@ class MacOSAdapter(BasePlatformAdapter):
                     pass
             return darwin_adb
 
-        # 4. 若资源缺失，安全返回 "adb"
+        # 3. 检查用户级缓存目录 ~/.mimonitor_toolbox/bin/adb
+        user_adb = os.path.expanduser("~/.mimonitor_toolbox/bin/adb")
+        if os.path.exists(user_adb):
+            if not os.access(user_adb, os.X_OK):
+                try:
+                    os.chmod(user_adb, 0o755)
+                except Exception:
+                    pass
+            return user_adb
+
+        # 4. 若以上均无，静默自举下载
+        try:
+            if self._bootstrap_adb_binary(user_adb):
+                return user_adb
+        except Exception:
+            pass
+
+        # 5. 兜底回退为系统命令名 "adb"
         return "adb"
