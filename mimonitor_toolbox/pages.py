@@ -54,6 +54,7 @@ from .core import (
     update_settings,
 )
 from .dashboard import DashboardInterface
+from .platform_adapter import get_platform_adapter
 from .widgets import PageScrollSlider
 
 
@@ -268,6 +269,7 @@ class PagesMixin:
         reset_mode_btn.clicked.connect(self._reset_current_mode)
         h.addWidget(reset_mode_btn)
         self.picture_mode_hint_label = BodyLabel("当前场景：未刷新", lf)
+        self.picture_mode_hint_label.setStyleSheet("color: rgba(255, 255, 255, 0.85); font-weight: bold; font-size: 12px;")
 
         h.addWidget(self.picture_mode_hint_label)
         h.addStretch(1)
@@ -360,7 +362,7 @@ class PagesMixin:
         layout.addLayout(title_row)
 
         self.game_mode_hint_label = BodyLabel("当前画面模式未知；高亮值尚未确认是否生效。", container)
-        self.game_mode_hint_label.setStyleSheet("color: #f0b85a; font-size: 12px;")
+        self.game_mode_hint_label.setStyleSheet("color: #FBBF24; font-weight: bold; font-size: 12px;")
         layout.addWidget(self.game_mode_hint_label)
 
         # Game Switches
@@ -650,7 +652,10 @@ class PagesMixin:
         def on_theme_changed(index):
             if index == 0:
                 theme_str = "auto"
-                setTheme(Theme.AUTO)
+                if get_platform_adapter().is_system_dark_theme():
+                    setTheme(Theme.DARK)
+                else:
+                    setTheme(Theme.LIGHT)
             elif index == 1:
                 theme_str = "dark"
                 setTheme(Theme.DARK)

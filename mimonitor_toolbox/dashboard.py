@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
     QDialog,
@@ -311,6 +311,29 @@ class DashboardStatusBar(SimpleCardWidget):
             self.metric_labels["hdr_status"].setText("未知")
 
 
+class PresetApplyWorker(QThread):
+    """专用后台 QThread 异步下发情景模式，保证子线程绝不触碰任何 QWidget 或 InfoBar。"""
+
+    apply_finished = pyqtSignal(bool, str, str)  # (success, msg, preset_id)
+    progress_updated = pyqtSignal(str)
+
+    def __init__(self, preset: PresetProfile, app: Any, parent=None):
+        super().__init__(parent)
+        self.preset = preset
+        self.app = app
+
+    def run(self):
+        try:
+            success, msg = get_preset_manager().execute_preset_pipeline(
+                self.preset,
+                self.app,
+                on_progress=lambda desc, pct: self.progress_updated.emit(desc),
+            )
+            self.apply_finished.emit(success, msg, self.preset.id)
+        except Exception as exc:
+            self.apply_finished.emit(False, str(exc), self.preset.id)
+
+
 class DashboardInterface(ScrollArea):
     """情景模式仪表盘顶层视图。"""
 
@@ -321,6 +344,7 @@ class DashboardInterface(ScrollArea):
         super().__init__(parent)
         self.preset_manager = get_preset_manager()
         self._cards: Dict[str, PresetCard] = {}
+        self._active_workers: Dict[str, PresetApplyWorker] = {}
 
         self.setWidgetResizable(True)
         self.setStyleSheet("QScrollArea { border: none; background: transparent; }")
@@ -438,44 +462,46 @@ class DashboardInterface(ScrollArea):
             else:
                 card.setEnabled(False)
 
-        def on_finished(success: bool, msg: str):
-            # 恢复卡片状态
-            for cid, card in self._cards.items():
-                card.set_loading(False)
-                card.setEnabled(True)
-                card.set_active(cid == preset_id if success else False)
+        # 启动 QThread 异步下发，主线程接收信号执行 UI 呈现，绝不在子线程触碰 QWidget 或 InfoBar
+        worker = PresetApplyWorker(preset, parent_window, self)
+        worker.apply_finished.connect(self._on_preset_apply_finished)
+        self._active_workers[preset_id] = worker
+        worker.start()
 
-            if success:
-                InfoBar.success(
-                    title="应用成功",
-                    content=msg,
-                    orient=Qt.Orientation.Horizontal,
-                    isClosable=True,
-                    position=InfoBarPosition.TOP_RIGHT,
-                    duration=3000,
-                    parent=self,
-                )
+    def _on_preset_apply_finished(self, success: bool, msg: str, preset_id: str):
+        """主线程槽函数：安全恢复卡片状态，在主线程弹出 InfoBar 并联动其他页面。"""
+        self._active_workers.pop(preset_id, None)
+        for cid, card in self._cards.items():
+            card.set_loading(False)
+            card.setEnabled(True)
+            card.set_active(cid == preset_id if success else False)
+
+        if success:
+            InfoBar.success(
+                title="应用成功",
+                content=msg,
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=3000,
+                parent=self,
+            )
+            preset = self.preset_manager.get_preset(preset_id)
+            if preset:
                 # 触发联动信号通知高级设置页同步更新 Slider/Button
                 self.preset_applied.emit(preset.settings_map)
                 # 刷新状态摘要栏
                 self.status_bar.update_metrics(preset.settings_map)
-            else:
-                InfoBar.error(
-                    title="应用失败",
-                    content=msg,
-                    orient=Qt.Orientation.Horizontal,
-                    isClosable=True,
-                    position=InfoBarPosition.TOP_RIGHT,
-                    duration=4000,
-                    parent=self,
-                )
-
-        # 启动动作流水线后台安全下发
-        self.preset_manager.apply_preset_pipeline(
-            preset=preset,
-            app=parent_window,
-            on_finished=on_finished,
-        )
+        else:
+            InfoBar.error(
+                title="应用失败",
+                content=msg,
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+                parent=self,
+            )
 
     def delete_preset(self, preset_id: str):
         """删除指定自定义情景。"""

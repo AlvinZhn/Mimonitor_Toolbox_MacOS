@@ -77,3 +77,11 @@ class BasePlatformAdapter(ABC):
         :return: ADB 可执行文件绝对路径或 "adb"。
         """
         pass
+
+    @abstractmethod
+    def is_system_dark_theme(self) -> bool:
+        """探测操作系统当前是否处于深色/暗黑主题模式。
+
+        :return: True 为深色模式，False 为浅色模式或未知。
+        """
+        pass

@@ -144,16 +144,12 @@ class MacOSAdapterNetworkFilteringTests(unittest.TestCase):
 
 
 class MacOSAdapterAdbPathTests(unittest.TestCase):
-    """验证 ADB 路径适配、which 优先与权限设置。"""
+    """验证 ADB 路径适配、内置 ADB 优先与权限设置。"""
 
     def setUp(self):
         self.adapter = MacOSAdapter()
 
-    def test_prefers_system_path_when_which_adb_is_found(self):
-        with mock.patch("shutil.which", return_value="/opt/homebrew/bin/adb"):
-            self.assertEqual(self.adapter.get_bundled_adb_path(), "/opt/homebrew/bin/adb")
-
-    def test_falls_back_to_darwin_adb_and_ensures_chmod_x(self):
+    def test_prefers_bundled_darwin_adb_and_ensures_chmod_x(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             darwin_dir = os.path.join(temp_dir, "assets", "runtime", "darwin")
             os.makedirs(darwin_dir, exist_ok=True)
@@ -165,21 +161,38 @@ class MacOSAdapterAdbPathTests(unittest.TestCase):
             os.chmod(fake_adb, stat.S_IRUSR | stat.S_IWUSR)
             self.assertFalse(os.access(fake_adb, os.X_OK))
 
-            with mock.patch("shutil.which", return_value=None), mock.patch(
+            with mock.patch(
                 "mimonitor_toolbox.core.bundled_resource_path",
                 return_value=fake_adb,
             ):
                 result_path = self.adapter.get_bundled_adb_path()
                 self.assertEqual(result_path, fake_adb)
-                # 验证已自动添加执行权限 (chmod +x)
+                # 验证已自动添加执行权限 (chmod 0o755)
                 self.assertTrue(os.access(fake_adb, os.X_OK))
+
+    def test_prefers_system_path_when_bundled_absent_and_which_adb_found(self):
+        orig_exists = os.path.exists
+        with mock.patch("mimonitor_toolbox.core.bundled_resource_path", return_value=None), \
+             mock.patch("os.path.exists", side_effect=lambda p: False if "darwin/adb" in str(p) else orig_exists(p)), \
+             mock.patch("shutil.which", return_value="/opt/homebrew/bin/adb"):
+            self.assertEqual(self.adapter.get_bundled_adb_path(), "/opt/homebrew/bin/adb")
+
+    def test_is_system_dark_theme_detects_dark_and_light(self):
+        with mock.patch("subprocess.check_output", return_value="Dark\n"):
+            self.assertTrue(self.adapter.is_system_dark_theme())
+        with mock.patch("subprocess.check_output", side_effect=Exception("error")):
+            self.assertFalse(self.adapter.is_system_dark_theme())
 
     def test_prefers_user_cached_adb_when_present(self):
         user_adb = os.path.expanduser("~/.mimonitor_toolbox/bin/adb")
+        orig_exists = os.path.exists
         with mock.patch("shutil.which", return_value=None), mock.patch(
             "mimonitor_toolbox.core.bundled_resource_path",
             return_value=None,
-        ), mock.patch("os.path.exists", side_effect=lambda p: p == user_adb), mock.patch(
+        ), mock.patch(
+            "os.path.exists",
+            side_effect=lambda p: (p == user_adb) if "darwin/adb" not in str(p) else False,
+        ), mock.patch(
             "os.access", return_value=True
         ):
             self.assertEqual(self.adapter.get_bundled_adb_path(), user_adb)

@@ -144,10 +144,10 @@ class TestModelDetectionAndDynamicTitle(unittest.TestCase):
             self.assertEqual(get_cached_model_title(), DEFAULT_APP_TITLE)
 
         with mock.patch("mimonitor_toolbox.core.load_settings", return_value={"detected_model": "Redmi G Pro 32U"}):
-            self.assertEqual(get_cached_model_title(), "红米 G Pro 32U Toolbox")
+            self.assertEqual(get_cached_model_title(), "红米 G Pro 32U 控制台")
 
         with mock.patch("mimonitor_toolbox.core.load_settings", return_value={"detected_model": "Redmi G Pro 27U"}):
-            self.assertEqual(get_cached_model_title(), "红米 G Pro 27U Toolbox")
+            self.assertEqual(get_cached_model_title(), "红米 G Pro 27U 控制台")
 
     def test_detect_device_model_parses_32u_panel(self):
         from mimonitor_toolbox import device_features
@@ -155,7 +155,7 @@ class TestModelDetectionAndDynamicTitle(unittest.TestCase):
         host = SimpleNamespace(
             adb=SimpleNamespace(
                 ip="192.168.1.100",
-                shell=lambda cmd: "32\n",
+                shell=lambda cmd: "console=ttyS0 androidboot.mi.panel_size=32 init=/init\n",
             ),
             adb_connected=True,
             _run_adb_action=lambda label, op, on_success=None, on_failure=None: on_success(op()),
@@ -173,7 +173,7 @@ class TestModelDetectionAndDynamicTitle(unittest.TestCase):
         host = SimpleNamespace(
             adb=SimpleNamespace(
                 ip="192.168.1.100",
-                shell=lambda cmd: "27\n",
+                shell=lambda cmd: "console=ttyS0 androidboot.mi.panel_size=27 init=/init\n",
             ),
             adb_connected=True,
             _run_adb_action=lambda label, op, on_success=None, on_failure=None: on_success(op()),
@@ -193,11 +193,12 @@ class TestModelDetectionAndDynamicTitle(unittest.TestCase):
             window = App()
 
         window.adb_connected = True
+        window.adb.ip = "192.168.1.14"
         window.tray_icon = mock.MagicMock()
         window._update_app_model_title("Redmi G Pro 32U")
-        self.assertIn("红米 G Pro 32U Toolbox - 已连接", window.windowTitle())
-        window.tray_icon.setToolTip.assert_called_with("红米 G Pro 32U Toolbox")
-        self.assertEqual(window.home_title_label.text(), "红米 G Pro 32U Toolbox")
+        self.assertEqual("红米 G Pro 32U 控制台 - 已连接 (192.168.1.14)", window.windowTitle())
+        window.tray_icon.setToolTip.assert_called_with("红米 G Pro 32U 控制台")
+        self.assertEqual(window.home_title_label.text(), "红米 G Pro 32U 控制台")
 
         window._cleanup_done = True
         window.deleteLater()

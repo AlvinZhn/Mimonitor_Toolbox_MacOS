@@ -178,3 +178,17 @@ class WindowsAdapter(BasePlatformAdapter):
             elif key.startswith("F") and key[1:].isdigit():
                 vk_val = 0x6F + int(key[1:])
         return mod_val, vk_val
+
+    def is_system_dark_theme(self) -> bool:
+        """探测 Windows 当前是否处于深色主题模式。"""
+        try:
+            import winreg
+
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            )
+            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return val == 0
+        except Exception:
+            return False

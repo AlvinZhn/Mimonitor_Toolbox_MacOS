@@ -39,6 +39,9 @@ class FallbackAdapter(BasePlatformAdapter):
 
         return shutil.which("adb") or "adb"
 
+    def is_system_dark_theme(self) -> bool:
+        return False
+
 
 _adapter_instance: Optional[BasePlatformAdapter] = None
 

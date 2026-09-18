@@ -69,10 +69,10 @@ def get_cached_model_title() -> str:
     model = settings.get("detected_model")
     if model:
         if "32" in str(model):
-            return "红米 G Pro 32U Toolbox"
+            return "红米 G Pro 32U 控制台"
         elif "27" in str(model):
-            return "红米 G Pro 27U Toolbox"
-        return f"{model} Toolbox"
+            return "红米 G Pro 27U 控制台"
+        return f"{model} 控制台"
     return DEFAULT_APP_TITLE
 
 def save_detected_model(model_name: str) -> None:

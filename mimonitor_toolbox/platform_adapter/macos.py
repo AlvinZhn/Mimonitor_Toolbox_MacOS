@@ -313,41 +313,38 @@ class MacOSAdapter(BasePlatformAdapter):
         """获取适配 macOS 的 ADB 执行路径。
 
         流水线：
-        1. 优先检测系统环境 shutil.which('adb')；
-        2. 其次查项目内置资源 assets/runtime/darwin/adb；
+        1. 优先查项目内置原生资源 assets/runtime/darwin/adb 并赋予 0o755 权限；
+        2. 其次检测系统环境 PATH 中的 shutil.which('adb')；
         3. 再次查用户缓存目录 ~/.mimonitor_toolbox/bin/adb；
-        4. 若上述三者皆无，静默从 Google 官方静态源自举下载并赋予执行权限；
+        4. 若上述三者皆无，静默从 Google 官方静态源自举下载；
         5. 兜底返回 "adb"。
         """
         from ..core import bundled_resource_path, get_app_base_dir
 
-        # 1. 优先检测系统环境 shutil.which('adb')
-        system_adb = shutil.which("adb")
-        if system_adb:
-            return system_adb
-
-        # 2. 检查应用内置资源 assets/runtime/darwin/adb
+        # 1. 优先检查内置资源 assets/runtime/darwin/adb，并确保赋予 0o755 执行权限
         darwin_adb = bundled_resource_path("assets", "runtime", "darwin", "adb")
         if not darwin_adb:
             darwin_adb = os.path.join(get_app_base_dir(), "assets", "runtime", "darwin", "adb")
 
         if os.path.exists(darwin_adb):
-            if not os.access(darwin_adb, os.X_OK):
-                try:
-                    mode = os.stat(darwin_adb).st_mode
-                    os.chmod(darwin_adb, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-                except Exception:
-                    pass
+            try:
+                os.chmod(darwin_adb, 0o755)
+            except Exception:
+                pass
             return darwin_adb
+
+        # 2. 其次检测系统环境 shutil.which('adb')
+        system_adb = shutil.which("adb")
+        if system_adb:
+            return system_adb
 
         # 3. 检查用户级缓存目录 ~/.mimonitor_toolbox/bin/adb
         user_adb = os.path.expanduser("~/.mimonitor_toolbox/bin/adb")
         if os.path.exists(user_adb):
-            if not os.access(user_adb, os.X_OK):
-                try:
-                    os.chmod(user_adb, 0o755)
-                except Exception:
-                    pass
+            try:
+                os.chmod(user_adb, 0o755)
+            except Exception:
+                pass
             return user_adb
 
         # 4. 若以上均无，静默自举下载
@@ -359,3 +356,17 @@ class MacOSAdapter(BasePlatformAdapter):
 
         # 5. 兜底回退为系统命令名 "adb"
         return "adb"
+
+    def is_system_dark_theme(self) -> bool:
+        """增强 macOS 系统主题探测函数：
+        执行 defaults read -g AppleInterfaceStyle，若捕获输出为 Dark，则判定为深色主题；否则为浅色主题。
+        """
+        try:
+            out = subprocess.check_output(
+                ["defaults", "read", "-g", "AppleInterfaceStyle"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+            return out.lower() == "dark"
+        except Exception:
+            return False

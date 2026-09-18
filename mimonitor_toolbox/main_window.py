@@ -128,19 +128,30 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
 
         # macOS 专属原生视觉与人机规范适配
         if sys.platform == "darwin":
+            if hasattr(self, "setSystemTitleBarButtonVisible"):
+                self.setSystemTitleBarButtonVisible(True)
             if hasattr(self, "titleBar") and self.titleBar is not None:
                 if hasattr(self.titleBar, "minBtn") and self.titleBar.minBtn:
                     self.titleBar.minBtn.hide()
+                    self.titleBar.minBtn.setFixedSize(0, 0)
                 if hasattr(self.titleBar, "maxBtn") and self.titleBar.maxBtn:
                     self.titleBar.maxBtn.hide()
+                    self.titleBar.maxBtn.setFixedSize(0, 0)
                 if hasattr(self.titleBar, "closeBtn") and self.titleBar.closeBtn:
                     self.titleBar.closeBtn.hide()
+                    self.titleBar.closeBtn.setFixedSize(0, 0)
+                if hasattr(self.titleBar, "buttonLayout") and self.titleBar.buttonLayout:
+                    while self.titleBar.buttonLayout.count():
+                        child = self.titleBar.buttonLayout.takeAt(0)
+                        if child.widget():
+                            child.widget().hide()
+                            child.widget().setParent(None)
                 if hasattr(self.titleBar, "hBoxLayout") and self.titleBar.hBoxLayout:
-                    self.titleBar.hBoxLayout.setContentsMargins(70, 0, 0, 0)
+                    self.titleBar.hBoxLayout.setContentsMargins(75, 0, 0, 0)
 
             if hasattr(self, "navigationInterface") and self.navigationInterface is not None:
                 if hasattr(self.navigationInterface, "panel") and hasattr(self.navigationInterface.panel, "topLayout"):
-                    self.navigationInterface.panel.topLayout.setContentsMargins(4, 30, 4, 0)
+                    self.navigationInterface.panel.topLayout.setContentsMargins(4, 32, 4, 0)
 
         if hasattr(self, "dashboard_page"):
             self.dashboard_page.preset_applied.connect(self._sync_ui_from_preset)
@@ -243,6 +254,19 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
                 user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
             except Exception:
                 pass
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if sys.platform == "darwin":
+            if hasattr(self, "setSystemTitleBarButtonVisible"):
+                self.setSystemTitleBarButtonVisible(True)
+            if hasattr(self, "titleBar") and self.titleBar is not None:
+                if hasattr(self.titleBar, "minBtn") and self.titleBar.minBtn:
+                    self.titleBar.minBtn.hide()
+                if hasattr(self.titleBar, "maxBtn") and self.titleBar.maxBtn:
+                    self.titleBar.maxBtn.hide()
+                if hasattr(self.titleBar, "closeBtn") and self.titleBar.closeBtn:
+                    self.titleBar.closeBtn.hide()
 
     def on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger or reason == QSystemTrayIcon.ActivationReason.DoubleClick:
@@ -797,14 +821,16 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
         """根据识别出的机型动态更新窗口标题、托盘气泡与主页标题。"""
         self.detected_model = model
         if "32" in str(model):
-            title_text = "红米 G Pro 32U Toolbox"
+            title_text = "红米 G Pro 32U 控制台"
         elif "27" in str(model):
-            title_text = "红米 G Pro 27U Toolbox"
+            title_text = "红米 G Pro 27U 控制台"
         else:
-            title_text = f"{model} Toolbox"
+            title_text = f"{model} 控制台"
         self.current_model_title = title_text
 
-        status_suffix = "已连接" if getattr(self, "adb_connected", False) else "未连接"
+        ip = str(getattr(getattr(self, "adb", None), "ip", "") or "").strip()
+        ip_part = f" ({ip})" if getattr(self, "adb_connected", False) and ip else ""
+        status_suffix = f"已连接{ip_part}" if getattr(self, "adb_connected", False) else "未连接"
         self.setWindowTitle(f"{title_text} - {status_suffix}")
         if hasattr(self, "tray_icon") and self.tray_icon:
             self.tray_icon.setToolTip(title_text)

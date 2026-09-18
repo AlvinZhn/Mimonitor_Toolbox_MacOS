@@ -1,6 +1,7 @@
 """设备连接、扫描、保活、Guardian 和页面数据加载功能。"""
 
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -1057,14 +1058,15 @@ class DeviceFeaturesMixin:
             return
 
         def operation():
-            cmd = "cat /proc/cmdline | grep -o 'androidboot.mi.panel_size=[0-9]*' | cut -d= -f2"
-            return self.adb.shell(cmd).strip().replace("\r", "")
+            return self.adb.shell("cat /proc/cmdline")
 
         def on_success(res):
-            res_str = str(res or "").strip()
-            if "32" in res_str:
+            cmdline_text = str(res or "")
+            match = re.search(r"androidboot\.mi\.panel_size=(\d+)", cmdline_text)
+            panel_size = match.group(1) if match else None
+            if panel_size == "32":
                 model = "Redmi G Pro 32U"
-            elif "27" in res_str:
+            elif panel_size == "27":
                 model = "Redmi G Pro 27U"
             else:
                 return

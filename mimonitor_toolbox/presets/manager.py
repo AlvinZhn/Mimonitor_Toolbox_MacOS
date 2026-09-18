@@ -264,6 +264,140 @@ class PresetManager:
             is_builtin=False,
         )
 
+    def execute_preset_pipeline(
+        self,
+        preset: PresetProfile,
+        app: Any,
+        on_progress: Optional[Callable[[str, int], None]] = None,
+    ) -> tuple[bool, str]:
+        """同步执行情景参数下发动作流水线，严格保证串行与原子性，返回 (success, message)。"""
+        with self._lock:
+            if self._is_applying:
+                return False, "正在应用其他情景，请稍候..."
+            self._is_applying = True
+
+        try:
+            if not getattr(app, "adb_connected", False) or not getattr(app, "adb", None):
+                raise RuntimeError("尚未连接显示器，请先在主页完成 ADB 连接")
+
+            adb = app.adb
+            settings = preset.settings_map
+            total_steps = len(settings) + 1
+            current_step = 0
+
+            def step_notify(desc: str):
+                nonlocal current_step
+                current_step += 1
+                percent = int((current_step / total_steps) * 100)
+                if on_progress:
+                    on_progress(desc, percent)
+
+            # 1. 控光档位 (JNI g_video__vid_local_dimming)
+            if "picture_local_dimming" in settings:
+                val = int(settings["picture_local_dimming"])
+                step_notify("设置精密控光")
+                try:
+                    adb.call_jni(
+                        "g_video__vid_local_dimming",
+                        val,
+                        "tv_picture_video_local_dimming",
+                        check=True,
+                    )
+                    adb.put("picture_local_dimming", str(val), check=False)
+                except Exception:
+                    pass
+
+            # 2. 色域映射 (JNI g_video__vid_gamut_mapping_mode)
+            if "tv_picture_advanced_video_color_space" in settings:
+                val = int(settings["tv_picture_advanced_video_color_space"])
+                step_notify("切换色彩空间与色域")
+                try:
+                    adb.call_jni("g_video__vid_gamut_mapping_mode", val, check=True)
+                    adb.put("tv_picture_advanced_video_color_space", str(val), check=False)
+                except Exception:
+                    pass
+
+            # 3. 色温预设
+            if "picture_color_temperature" in settings:
+                val = int(settings["picture_color_temperature"])
+                step_notify("调整色温模式")
+                try:
+                    adb.set_color_temp(val, check=True)
+                except Exception:
+                    pass
+
+            # 4. 画面预设模式 (picture_mode)
+            if "picture_mode" in settings:
+                val = int(settings["picture_mode"])
+                step_notify("切换画面显示模式")
+                try:
+                    adb.put("picture_mode", str(val), check=True)
+                    adb.put("picture_preset_scenario", str(val), check=False)
+                except Exception:
+                    pass
+
+            # 5. 对比度
+            if "contrast" in settings:
+                val = int(settings["contrast"])
+                step_notify("调整画面对比度")
+                try:
+                    adb.put("picture_contrast", str(val), check=False)
+                except Exception:
+                    pass
+
+            # 6. 黑色级别
+            if "black_level" in settings:
+                val = int(settings["black_level"])
+                step_notify("调整黑色级别")
+                try:
+                    adb.put("picture_brightness", str(val), check=False)
+                except Exception:
+                    pass
+
+            # 7. 饱和度
+            if "saturation" in settings:
+                val = int(settings["saturation"])
+                step_notify("调整色彩饱和度")
+                try:
+                    adb.put("picture_saturation", str(val), check=False)
+                except Exception:
+                    pass
+
+            # 8. 锐度
+            if "sharpness" in settings:
+                val = int(settings["sharpness"])
+                step_notify("调整画面锐度")
+                try:
+                    adb.put("picture_sharpness", str(val), check=False)
+                except Exception:
+                    pass
+
+            # 9. 背光亮度 (最后下发保证视觉舒适)
+            if "backlight" in settings:
+                val = int(settings["backlight"])
+                step_notify("调整背光亮度")
+                try:
+                    adb.call_jni("g_disp__disp_back_light", val, check=True)
+                    adb.put("picture_backlight", str(val), check=False)
+                    adb.put("xiaomi_picture_backlight", str(val), check=False)
+                except Exception:
+                    pass
+
+            # 10. 刷新 PQ 与全局状态回读同步
+            step_notify("刷新画质引擎与同步状态")
+            try:
+                adb.refresh_pq(check=True)
+            except Exception:
+                pass
+
+            self._active_preset_id = preset.id
+            return True, f"情景【{preset.name}】已成功应用"
+        except Exception as exc:
+            return False, str(exc)
+        finally:
+            with self._lock:
+                self._is_applying = False
+
     def apply_preset_pipeline(
         self,
         preset: PresetProfile,
@@ -271,152 +405,11 @@ class PresetManager:
         on_progress: Optional[Callable[[str, int], None]] = None,
         on_finished: Optional[Callable[[bool, str], None]] = None,
     ) -> None:
-        """动作流水线执行器：异步、串行安全下发情景参数。
-
-        避免高频连击与 ADB 竞态，并在完成后通知主应用同步 UI。
-        """
-        with self._lock:
-            if self._is_applying:
-                if on_finished:
-                    on_finished(False, "正在应用其他情景，请稍候...")
-                return
-            self._is_applying = True
-
+        """动作流水线执行器：异步下发情景参数。"""
         def _worker():
-            success = True
-            err_msg = ""
-            try:
-                if not getattr(app, "adb_connected", False) or not getattr(app, "adb", None):
-                    raise RuntimeError("尚未连接显示器，请先在主页完成 ADB 连接")
-
-                adb = app.adb
-                settings = preset.settings_map
-                total_steps = len(settings) + 1
-                current_step = 0
-
-                def step_notify(desc: str):
-                    nonlocal current_step
-                    current_step += 1
-                    percent = int((current_step / total_steps) * 100)
-                    if on_progress:
-                        on_progress(desc, percent)
-
-                # 1. 控光档位 (JNI g_video__vid_local_dimming)
-                if "picture_local_dimming" in settings:
-                    val = int(settings["picture_local_dimming"])
-                    step_notify("设置精密控光")
-                    try:
-                        adb.call_jni(
-                            "g_video__vid_local_dimming",
-                            val,
-                            "tv_picture_video_local_dimming",
-                            check=True,
-                        )
-                        adb.put("picture_local_dimming", str(val), check=False)
-                    except Exception as e:
-                        pass
-
-                # 2. 色域映射 (JNI g_video__vid_gamut_mapping_mode)
-                if "tv_picture_advanced_video_color_space" in settings:
-                    val = int(settings["tv_picture_advanced_video_color_space"])
-                    step_notify("设置色域标准")
-                    try:
-                        adb.call_jni(
-                            "g_video__vid_gamut_mapping_mode",
-                            val,
-                            "tv_picture_video_color_space",
-                            check=True,
-                        )
-                        adb.put("tv_picture_advanced_video_color_space", str(val), check=False)
-                    except Exception:
-                        pass
-
-                # 3. 色温 (1:冷色, 2:标准, 3:暖色, 6:原色, 0:自定义)
-                if "picture_color_temperature" in settings:
-                    val = int(settings["picture_color_temperature"])
-                    step_notify("设置色温")
-                    try:
-                        # 兼容 Xiaomi OSD 与 MTK 色温编码映射
-                        mtk_val = {0: 1, 1: 2, 2: 3, 8: 6}.get(val, val)
-                        adb.set_color_temp(mtk_val, check=True)
-                        adb.put("picture_color_temperature", str(val), check=False)
-                    except Exception:
-                        pass
-
-                # 4. 响应时间 (1:普通, 2:快速, 3:高速)
-                if "picture_response_time" in settings:
-                    val = int(settings["picture_response_time"])
-                    step_notify("设置响应时间")
-                    try:
-                        adb.call_jni("g_video__vid_od_response_time", val, check=True)
-                        adb.put("picture_response_time", str(val), check=False)
-                    except Exception:
-                        pass
-
-                # 5. 动态清晰度 / 插黑
-                if "picture_dynamic_definition" in settings:
-                    val = int(settings["picture_dynamic_definition"])
-                    step_notify("设置动态清晰度")
-                    try:
-                        adb.call_jni("g_video__vid_insert_black", val, check=True)
-                        adb.put("picture_dynamic_definition", str(val), check=False)
-                    except Exception:
-                        pass
-
-                # 6. 对比度
-                if "contrast" in settings:
-                    val = int(settings["contrast"])
-                    step_notify("设置对比度")
-                    try:
-                        adb.put("picture_contrast", str(val), check=True)
-                    except Exception:
-                        pass
-
-                # 7. 黑色级别 / 亮度
-                if "black_level" in settings:
-                    val = int(settings["black_level"])
-                    step_notify("设置黑色级别")
-                    try:
-                        adb.put("picture_brightness", str(val), check=True)
-                    except Exception:
-                        pass
-
-                # 8. 炫彩灯模式
-                if "mt_colorful_led_mode" in settings:
-                    val = int(settings["mt_colorful_led_mode"])
-                    step_notify("切换氛围灯模式")
-                    try:
-                        adb.put("mt_colorful_led_mode", str(val), check=False)
-                    except Exception:
-                        pass
-
-                # 9. 背光亮度 (最后下发保证视觉舒适)
-                if "backlight" in settings:
-                    val = int(settings["backlight"])
-                    step_notify("调整背光亮度")
-                    try:
-                        adb.call_jni("g_disp__disp_back_light", val, check=True)
-                        adb.put("picture_backlight", str(val), check=False)
-                        adb.put("xiaomi_picture_backlight", str(val), check=False)
-                    except Exception:
-                        pass
-
-                # 10. 刷新 PQ 与全局状态回读同步
-                step_notify("刷新画质引擎与同步状态")
-                try:
-                    adb.refresh_pq(check=True)
-                except Exception:
-                    pass
-
-                self._active_preset_id = preset.id
-            except Exception as exc:
-                success = False
-                err_msg = str(exc)
-            finally:
-                with self._lock:
-                    self._is_applying = False
-                if on_finished:
-                    on_finished(success, err_msg or f"情景【{preset.name}】已成功应用")
+            success, msg = self.execute_preset_pipeline(preset, app, on_progress)
+            if on_finished:
+                on_finished(success, msg)
 
         threading.Thread(target=_worker, daemon=True).start()
 

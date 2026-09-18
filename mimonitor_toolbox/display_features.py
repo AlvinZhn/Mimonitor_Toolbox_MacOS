@@ -899,13 +899,13 @@ class DisplayFeaturesMixin:
         )
         if not mode_known:
             label.setText("当前画面模式未知；高亮值尚未确认是否生效。")
-            label.setStyleSheet("color: #f0b85a; font-size: 12px;")
+            label.setStyleSheet("color: #FBBF24; font-weight: bold; font-size: 12px;")
         elif DisplayFeaturesMixin._is_game_mode_active(self):
             label.setText("当前为游戏模式；下方高亮为当前生效值。")
-            label.setStyleSheet("font-size: 12px;")
+            label.setStyleSheet("color: rgba(255, 255, 255, 0.85); font-weight: bold; font-size: 12px;")
         else:
             label.setText("当前不是游戏模式；下方高亮为记忆值，功能当前未生效。")
-            label.setStyleSheet("color: #f0b85a; font-size: 12px;")
+            label.setStyleSheet("color: #FBBF24; font-weight: bold; font-size: 12px;")
 
     def _update_hdr_tone_mapping_visibility(self, mode=None):
         card = getattr(self, "hdr_tone_mapping_card", None)
@@ -928,18 +928,18 @@ class DisplayFeaturesMixin:
 
         if mode_int is None:
             label.setText(f"当前场景：未知（{mode}）")
-            label.setStyleSheet("color: #f0b85a; font-size: 12px;")
+            label.setStyleSheet("color: #FBBF24; font-weight: bold; font-size: 12px;")
             return
 
         group_name = self._picture_mode_group_name(mode_int)
         if group_name:
             label.setText(f"当前场景：{group_name}（{mode_int}）")
-            label.setStyleSheet("font-size: 12px;")
+            label.setStyleSheet("color: rgba(255, 255, 255, 0.85); font-weight: bold; font-size: 12px;")
             return
 
         scene_name = PICTURE_SCENE_NAMES.get(mode_int, "未知场景")
         label.setText(f"当前场景：{scene_name}（{mode_int}），不匹配上方模式按钮")
-        label.setStyleSheet("color: #f0b85a; font-size: 12px;")
+        label.setStyleSheet("color: #FBBF24; font-weight: bold; font-size: 12px;")
 
     def _set_mode(self, val, name):
         if not self.check_connection(): return

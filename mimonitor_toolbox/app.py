@@ -12,6 +12,7 @@ from qfluentwidgets import Theme, setTheme
 
 from .core import cleanup_stale_extract_dirs, get_app_data_dir, load_settings
 from .main_window import App
+from .platform_adapter import get_platform_adapter
 
 
 SERVER_NAME = "mitv_gpro27u_controller_single_instance"
@@ -63,7 +64,10 @@ def main() -> int:
     settings = load_settings()
     theme_value = settings.get("theme", "dark")
     if theme_value == "auto":
-        setTheme(Theme.AUTO)
+        if get_platform_adapter().is_system_dark_theme():
+            setTheme(Theme.DARK)
+        else:
+            setTheme(Theme.LIGHT)
     elif theme_value == "light":
         setTheme(Theme.LIGHT)
     else:
