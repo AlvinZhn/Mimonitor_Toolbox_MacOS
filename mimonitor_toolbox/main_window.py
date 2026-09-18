@@ -8,9 +8,11 @@ import threading
 import time
 
 from PyQt6.QtCore import QRect, QSize, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap, QPen
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMenu, QSystemTrayIcon
 from qfluentwidgets import FluentWindow, MessageBox
+
+from .presets.manager import get_preset_manager
 
 from . import adb as adb_runtime
 from .adb import (
@@ -165,6 +167,7 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
 
         if hasattr(self, "dashboard_page"):
             self.dashboard_page.preset_applied.connect(self._sync_ui_from_preset)
+            self.dashboard_page.preset_applied.connect(lambda _: self._update_tray_menu())
             self.switchTo(self.dashboard_page)
         self.setup_tray()
         self.initialize_display_features()
@@ -193,42 +196,158 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
 
     def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
+        self._tray_apply_workers = {}
 
-        # Create a beautiful, crisp G Pro theme icon dynamically!
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor("#734EFF"))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(2, 2, 28, 28)
-        painter.setPen(QColor("white"))
-        font = painter.font()
-        font.setBold(True)
-        font.setPixelSize(18)
-        painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "G")
-        painter.end()
-        icon = QIcon(pixmap)
+        if sys.platform == "darwin":
+            # macOS 规范：透明底单色模板图标，由系统自适应深浅色菜单栏
+            pixmap = QPixmap(32, 32)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(QPen(QColor(0, 0, 0, 240), 2.2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(4, 5, 24, 16, 2.5, 2.5)
+            painter.drawLine(16, 21, 16, 25)
+            painter.drawLine(10, 25, 22, 25)
+            painter.end()
+            tray_icon_img = QIcon(pixmap)
+            tray_icon_img.setIsMask(True)
+        else:
+            # Windows / Linux：G Pro 品牌特色紫底主题图标
+            pixmap = QPixmap(32, 32)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(QColor("#734EFF"))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(2, 2, 28, 28)
+            painter.setPen(QColor("white"))
+            font = painter.font()
+            font.setBold(True)
+            font.setPixelSize(18)
+            painter.setFont(font)
+            painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "G")
+            painter.end()
+            tray_icon_img = QIcon(pixmap)
 
-        self.tray_icon.setIcon(icon)
-        self.setWindowIcon(icon)
-        self.tray_icon.setToolTip("红米 G Pro 27U Toolbox")
-        
-        menu = QMenu()
-        show_action = QAction("显示主窗口", self)
-        show_action.triggered.connect(self.show_and_raise)
-        
-        exit_action = QAction("退出程序", self)
-        exit_action.triggered.connect(self.force_exit)
-        
-        menu.addAction(show_action)
-        menu.addSeparator()
-        menu.addAction(exit_action)
-        
-        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.setIcon(tray_icon_img)
+
+        # 窗口独立图标
+        icns_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "app", "icon.icns"
+        )
+        if os.path.exists(icns_path):
+            self.setWindowIcon(QIcon(icns_path))
+        else:
+            self.setWindowIcon(tray_icon_img)
+
+        self.tray_icon.setToolTip("红米 G Pro 27U/32U Toolbox")
+
+        self.tray_menu = QMenu()
+        self.tray_menu.aboutToShow.connect(self._update_tray_menu)
+        self.tray_icon.setContextMenu(self.tray_menu)
+        self._update_tray_menu()
+
         self.tray_icon.activated.connect(self.on_tray_activated)
         self.tray_icon.show()
+
+    def _update_tray_menu(self):
+        """动态构建系统托盘右键菜单，挂载情景模式快捷切换选项。"""
+        if not hasattr(self, "tray_menu"):
+            return
+        self.tray_menu.clear()
+
+        show_action = QAction("显示主窗口", self)
+        show_action.triggered.connect(self.show_and_raise)
+        self.tray_menu.addAction(show_action)
+        self.tray_menu.addSeparator()
+
+        # 情景模式切换组
+        preset_mgr = get_preset_manager()
+        active_id = preset_mgr.active_preset_id
+        presets = preset_mgr.get_all_presets()
+
+        for preset in presets:
+            is_active = preset.id == active_id
+            prefix = "● " if is_active else "   "
+            action = QAction(f"{prefix}{preset.name}", self)
+            action.triggered.connect(
+                lambda checked=False, pid=preset.id: self._apply_preset_from_tray(pid)
+            )
+            self.tray_menu.addAction(action)
+
+        self.tray_menu.addSeparator()
+        exit_action = QAction("退出程序", self)
+        exit_action.triggered.connect(self.force_exit)
+        self.tray_menu.addAction(exit_action)
+
+    def _apply_preset_from_tray(self, preset_id: str):
+        """托盘快捷切换：后台静默下发参数，完成后轻提示。"""
+        preset_mgr = get_preset_manager()
+        preset = preset_mgr.get_preset(preset_id)
+        if not preset:
+            return
+
+        if not getattr(self, "adb_connected", False) or not getattr(self, "adb", None):
+            self.tray_icon.showMessage(
+                "情景切换失败",
+                "尚未连接显示器，请先在主界面连接 ADB",
+                QSystemTrayIcon.MessageIcon.Warning,
+                3000,
+            )
+            return
+
+        if preset_mgr.is_applying:
+            self.tray_icon.showMessage(
+                "情景切换中",
+                "当前正在执行其他设置，请稍候...",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000,
+            )
+            return
+
+        from .dashboard import PresetApplyWorker
+
+        worker = PresetApplyWorker(preset, self, self)
+        worker.apply_finished.connect(self._on_tray_preset_applied)
+        self._tray_apply_workers[preset_id] = worker
+        worker.start()
+
+        self.tray_icon.showMessage(
+            "情景切换中",
+            f"正在切换至【{preset.name}】...",
+            QSystemTrayIcon.MessageIcon.Information,
+            1500,
+        )
+
+    def _on_tray_preset_applied(self, success: bool, msg: str, preset_id: str):
+        """托盘下发完成回调：触发轻提示并同步状态与菜单。"""
+        self._tray_apply_workers.pop(preset_id, None)
+        preset_mgr = get_preset_manager()
+        preset = preset_mgr.get_preset(preset_id)
+        name = preset.name if preset else "情景"
+
+        if success:
+            self.tray_icon.showMessage(
+                "情景切换完成",
+                f"已生效【{name}】",
+                QSystemTrayIcon.MessageIcon.Information,
+                2500,
+            )
+            if preset:
+                self._sync_ui_from_preset(preset.settings_map)
+                if hasattr(self, "dashboard_page"):
+                    self.dashboard_page.status_bar.update_metrics(preset.settings_map)
+                    for cid, card in self.dashboard_page._cards.items():
+                        card.set_active(cid == preset_id)
+            self._update_tray_menu()
+        else:
+            self.tray_icon.showMessage(
+                "情景切换失败",
+                f"【{name}】下发失败: {msg}",
+                QSystemTrayIcon.MessageIcon.Warning,
+                4000,
+            )
 
     def show_and_raise(self):
         self._restore_main_window()

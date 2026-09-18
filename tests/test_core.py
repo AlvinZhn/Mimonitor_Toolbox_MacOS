@@ -44,6 +44,25 @@ class CoreSettingsTests(unittest.TestCase):
 
         self.assertEqual(actual, expected)
 
+    def test_bundled_resource_path_frozen_macos(self):
+        from mimonitor_toolbox import core
+
+        with tempfile.TemporaryDirectory() as td:
+            bundle_dir = Path(td) / "Mimonitor Toolbox.app"
+            macos_dir = bundle_dir / "Contents" / "MacOS"
+            res_dir = bundle_dir / "Contents" / "Resources"
+            fake_adb = res_dir / "assets" / "runtime" / "darwin" / "adb"
+            fake_adb.parent.mkdir(parents=True, exist_ok=True)
+            fake_adb.write_text("fake adb binary", encoding="utf-8")
+
+            fake_exe = str(macos_dir / "Mimonitor Toolbox")
+            with mock.patch.object(core.sys, "frozen", True, create=True), \
+                 mock.patch.object(core.sys, "platform", "darwin"), \
+                 mock.patch.object(core.sys, "executable", fake_exe):
+                resolved = core.bundled_resource_path("assets", "runtime", "darwin", "adb")
+                self.assertEqual(resolved, str(fake_adb))
+
+
 
 class CleanupStaleExtractDirsTests(unittest.TestCase):
     """验证 onefile/_MEI 残留清理只删除死实例的解压目录。"""

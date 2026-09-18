@@ -1,0 +1,179 @@
+name: Multi-Platform Release (macOS & Windows)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '发布版本号 (如 v3.0.0)'
+        required: false
+        default: 'v3.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS DMG
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+          pip install pyinstaller pytest
+
+      - name: Run unit test gate
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m pytest tests/ -v
+
+      - name: Build macOS .app & .dmg
+        run: |
+          python tools/build_macos.py
+
+      - name: Upload macOS DMG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/Mimonitor-Toolbox-macOS.dmg
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows Exe & Installer
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+          python -m pip install pytest
+
+      - name: Validate source
+        shell: pwsh
+        run: |
+          python -m compileall -q monitor_controller.py mimonitor_toolbox
+
+      - name: Run unit test gate
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m unittest discover -s tests -v
+
+      - name: Cache Nuitka CCache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.ccache
+            AppData/Local/Nuitka/Nuitka/Cache
+          key: ${{ runner.os }}-nuitka-${{ hashFiles('requirements-build.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-nuitka-
+
+      - name: Build exe (onefile)
+        run: >-
+          python -m nuitka --onefile --enable-plugin=pyqt6
+          --windows-console-mode=disable
+          --windows-icon-from-ico=assets/app/icon.ico
+          --include-package=qfluentwidgets
+          --include-package-data=qfluentwidgets
+          --include-data-files=assets/runtime/adb.exe=assets/runtime/adb.exe
+          --include-data-files=assets/runtime/AdbWinApi.dll=assets/runtime/AdbWinApi.dll
+          --include-data-files=assets/runtime/AdbWinUsbApi.dll=assets/runtime/AdbWinUsbApi.dll
+          --include-data-files=assets/runtime/MtkDirectTool.jar=assets/runtime/MtkDirectTool.jar
+          --include-data-files=assets/runtime/ColorfulLedTool.jar=assets/runtime/ColorfulLedTool.jar
+          --include-data-files=assets/adb_guardian/adbguardian-signed.apk=assets/adb_guardian/adbguardian-signed.apk
+          --output-filename=MonitorToolbox.exe
+          --output-dir=dist-nuitka
+          --assume-yes-for-downloads
+          monitor_controller.py
+
+      - name: Build standalone
+        run: >-
+          python -m nuitka --standalone --enable-plugin=pyqt6
+          --windows-console-mode=disable
+          --windows-icon-from-ico=assets/app/icon.ico
+          --include-package=qfluentwidgets
+          --include-package-data=qfluentwidgets
+          --include-data-files=assets/runtime/adb.exe=assets/runtime/adb.exe
+          --include-data-files=assets/runtime/AdbWinApi.dll=assets/runtime/AdbWinApi.dll
+          --include-data-files=assets/runtime/AdbWinUsbApi.dll=assets/runtime/AdbWinUsbApi.dll
+          --include-data-files=assets/runtime/MtkDirectTool.jar=assets/runtime/MtkDirectTool.jar
+          --include-data-files=assets/runtime/ColorfulLedTool.jar=assets/runtime/ColorfulLedTool.jar
+          --include-data-files=assets/adb_guardian/adbguardian-signed.apk=assets/adb_guardian/adbguardian-signed.apk
+          --output-filename=MonitorToolbox.exe
+          --output-dir=dist-nuitka-standalone
+          --assume-yes-for-downloads
+          monitor_controller.py
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          Rename-Item dist-nuitka-standalone\monitor_controller.dist MonitorToolbox-portable
+          Compress-Archive -Path dist-nuitka-standalone\MonitorToolbox-portable -DestinationPath MonitorToolbox-portable.zip
+          Rename-Item dist-nuitka-standalone\MonitorToolbox-portable monitor_controller.dist
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ver = if ("${{ github.ref_name }}".StartsWith("v")) { "${{ github.ref_name }}" -replace '^v', '' } else { "${{ inputs.tag_name }}" -replace '^v', '' }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$ver" "installer\MonitorToolbox.iss"
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: |
+            dist-nuitka/MonitorToolbox.exe
+            MonitorToolbox-portable.zip
+            dist-installer/MonitorToolbox-Setup.exe
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Display downloaded assets
+        run: ls -la release-assets
+
+      - name: Create or update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag_name }}
+          files: |
+            release-assets/Mimonitor-Toolbox-macOS.dmg
+            release-assets/MonitorToolbox.exe
+            release-assets/MonitorToolbox-portable.zip
+            release-assets/MonitorToolbox-Setup.exe
+          generate_release_notes: true
+          draft: false
+          prerelease: false

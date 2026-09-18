@@ -123,6 +123,16 @@ def bundled_resource_path(*parts):
         p = os.path.join(sys._MEIPASS, *parts)
         if os.path.exists(p):
             return p
+    if sys.platform == "darwin" and is_frozen_build():
+        # macOS .app 标准资源布局: Contents/MacOS/../Resources
+        exe_dir = os.path.dirname(sys.executable)
+        res_dir = os.path.abspath(os.path.join(exe_dir, "..", "Resources"))
+        p = os.path.join(res_dir, *parts)
+        if os.path.exists(p):
+            return p
+        p_macos = os.path.join(exe_dir, *parts)
+        if os.path.exists(p_macos):
+            return p_macos
     if "__compiled__" in globals():
         # Nuitka 打包：__file__ 位于解包目录的 mimonitor_toolbox/ 包内
         p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), *parts)
