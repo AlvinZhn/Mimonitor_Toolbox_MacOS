@@ -36,6 +36,7 @@ from .device_features import DeviceFeaturesMixin
 from .display_features import DisplayFeaturesMixin
 from .pages import PagesMixin
 from .widgets import CloseConfirmDialog, OsdHud
+from .platform_adapter import get_platform_adapter
 from .windows import (
     MOD_ALT,
     MOD_CONTROL,
@@ -230,25 +231,23 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
                 self.show_and_raise()
 
     def register_global_hotkeys(self):
-        if sys.platform != "win32" or not user32:
-            return
-            
         self.unregister_all_hotkeys()
-        
+
         settings = load_settings()
         hotkeys = settings.get("hotkeys", {})
         adjust_hotkeys = settings.get("adjust_hotkeys", [])
-        
+
         self.hotkey_registry = {}
-        
+        self._local_hotkeys = {}
+
         mod_map = {
             "无": 0,
             "Ctrl + Alt": MOD_CONTROL | MOD_ALT,
             "Ctrl + Shift": MOD_CONTROL | MOD_SHIFT,
             "Alt + Shift": MOD_ALT | MOD_SHIFT,
-            "Win + Shift": MOD_WIN | MOD_SHIFT
+            "Win + Shift": MOD_WIN | MOD_SHIFT,
         }
-        
+
         vk_map = {}
         for i in range(1, 13):
             vk_map[f"F{i}"] = 0x6F + i
@@ -257,32 +256,58 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
         for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
             vk_map[char] = ord(char)
         vk_map.update(HOTKEY_EXTRA_VK)
-            
-        hwnd = int(self.winId())
-        
+
+        hwnd = 0
+        if sys.platform == "win32" and user32:
+            try:
+                hwnd = int(self.winId())
+            except Exception:
+                hwnd = 0
+
         hotkey_id = 1
+
         def register_one(payload, hk_conf):
             nonlocal hotkey_id
             mod_str = hk_conf.get("modifier", "无")
             key_str = hk_conf.get("key", "无")
             if mod_str == "无" and key_str == "无":
                 return
-                
-            mod_val = mod_map.get(mod_str, 0)
-            vk_val = vk_map.get(key_str, 0)
-            if vk_val == 0:
-                return
-                
-            res = user32.RegisterHotKey(hwnd, hotkey_id, mod_val, vk_val)
-            if res:
-                self.hotkey_registry[hotkey_id] = payload
-                hotkey_id += 1
-            else:
-                label = payload.get("action") if isinstance(payload, dict) else str(payload)
+
+            def on_trigger():
                 if isinstance(payload, dict) and payload.get("type") == "adjust":
-                    cfg = ADJUSTABLE_HOTKEY_PARAMS.get(payload.get("rule", {}).get("param"), {})
-                    label = cfg.get("label", "可调参数")
-                self.log(f"快捷键注册失败或冲突: {label} ({mod_str} + {key_str})")
+                    self.trigger_adjust_hotkey(payload.get("rule", {}))
+                else:
+                    action = payload.get("action") if isinstance(payload, dict) else payload
+                    self.trigger_hotkey_action(action)
+
+            combo = f"{mod_str} + {key_str}"
+            self._local_hotkeys[combo] = on_trigger
+
+            if sys.platform == "win32" and user32 and hwnd:
+                mod_val = mod_map.get(mod_str, 0)
+                vk_val = vk_map.get(key_str, 0)
+                if vk_val == 0:
+                    return
+
+                res = user32.RegisterHotKey(hwnd, hotkey_id, mod_val, vk_val)
+                if res:
+                    self.hotkey_registry[hotkey_id] = payload
+                    hotkey_id += 1
+                else:
+                    label = payload.get("action") if isinstance(payload, dict) else str(payload)
+                    if isinstance(payload, dict) and payload.get("type") == "adjust":
+                        cfg = ADJUSTABLE_HOTKEY_PARAMS.get(payload.get("rule", {}).get("param"), {})
+                        label = cfg.get("label", "可调参数")
+                    self.log(f"快捷键注册失败或冲突: {label} ({mod_str} + {key_str})")
+            else:
+                adapter = get_platform_adapter()
+                res = adapter.register_global_hotkey(combo, on_trigger)
+                if not res and getattr(adapter, "is_hotkey_degraded", lambda: False)():
+                    label = payload.get("action") if isinstance(payload, dict) else str(payload)
+                    if isinstance(payload, dict) and payload.get("type") == "adjust":
+                        cfg = ADJUSTABLE_HOTKEY_PARAMS.get(payload.get("rule", {}).get("param"), {})
+                        label = cfg.get("label", "可调参数")
+                    self.log(f"[快捷键降级] 缺少辅助功能权限，'{label}' 仅在窗口聚焦时生效")
 
         for action_name, hk_conf in hotkeys.items():
             register_one({"type": "cycle", "action": action_name}, hk_conf)
@@ -292,12 +317,65 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
                 register_one({"type": "adjust", "rule": rule}, rule)
 
     def unregister_all_hotkeys(self):
-        if sys.platform != "win32" or not user32 or not hasattr(self, "hotkey_registry"):
+        if hasattr(self, "_local_hotkeys"):
+            self._local_hotkeys.clear()
+        if sys.platform == "win32" and user32 and hasattr(self, "hotkey_registry"):
+            try:
+                hwnd = int(self.winId())
+                for hid in list(getattr(self, "hotkey_registry", {}).keys()):
+                    user32.UnregisterHotKey(hwnd, hid)
+            except Exception:
+                pass
+            self.hotkey_registry = {}
+        get_platform_adapter().unregister_all_hotkeys()
+
+    def keyPressEvent(self, event):
+        mods = []
+        qt_mods = event.modifiers()
+        if (qt_mods & Qt.KeyboardModifier.ControlModifier) and (qt_mods & Qt.KeyboardModifier.AltModifier):
+            mods.append("Ctrl + Alt")
+        elif (qt_mods & Qt.KeyboardModifier.ControlModifier) and (qt_mods & Qt.KeyboardModifier.ShiftModifier):
+            mods.append("Ctrl + Shift")
+        elif (qt_mods & Qt.KeyboardModifier.AltModifier) and (qt_mods & Qt.KeyboardModifier.ShiftModifier):
+            mods.append("Alt + Shift")
+        elif (qt_mods & (Qt.KeyboardModifier.MetaModifier | Qt.KeyboardModifier.GroupSwitchModifier)) and (
+            qt_mods & Qt.KeyboardModifier.ShiftModifier
+        ):
+            mods.append("Win + Shift")
+
+        mod_str = mods[0] if mods else "无"
+        key = event.key()
+        key_str = "无"
+        if Qt.Key.Key_F1 <= key <= Qt.Key.Key_F12:
+            key_str = f"F{key - Qt.Key.Key_F1 + 1}"
+        elif Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
+            key_str = chr(key)
+        elif Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
+            key_str = chr(key)
+        elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            key_str = "+"
+        elif key == Qt.Key.Key_Minus:
+            key_str = "-"
+        elif key == Qt.Key.Key_PageUp:
+            key_str = "PageUp"
+        elif key == Qt.Key.Key_PageDown:
+            key_str = "PageDown"
+        elif key == Qt.Key.Key_Up:
+            key_str = "↑"
+        elif key == Qt.Key.Key_Down:
+            key_str = "↓"
+        elif key == Qt.Key.Key_Left:
+            key_str = "←"
+        elif key == Qt.Key.Key_Right:
+            key_str = "→"
+
+        combo = f"{mod_str} + {key_str}"
+        handler = getattr(self, "_local_hotkeys", {}).get(combo)
+        if handler:
+            handler()
+            event.accept()
             return
-        hwnd = int(self.winId())
-        for hid in list(getattr(self, "hotkey_registry", {}).keys()):
-            user32.UnregisterHotKey(hwnd, hid)
-        self.hotkey_registry = {}
+        super().keyPressEvent(event)
 
     def nativeEvent(self, eventType, message):
         if sys.platform == "win32" and eventType == b"windows_generic_MSG" and user32:
@@ -531,17 +609,17 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
             self.log("已取消开机自启动")
 
     def _get_autostart_path(self):
-        return get_autostart_path()
+        return get_platform_adapter().get_autostart_path()
 
     def _get_exe_path(self):
         return get_executable_path()
 
     def _install_autostart(self):
-        if not install_autostart(self._get_exe_path()):
+        if not get_platform_adapter().set_autostart(True, self._get_exe_path()):
             self.log("设置自启动失败")
 
     def _remove_autostart(self):
-        if not remove_autostart():
+        if not get_platform_adapter().set_autostart(False):
             self.log("取消自启动失败")
 
     def _toggle_4k_ui(self, state):

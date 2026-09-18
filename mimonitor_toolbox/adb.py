@@ -19,9 +19,11 @@ from .core import (
 from .network_scan import (
     WindowsAdapterError,
     build_probe_targets,
+    get_scan_networks,
     get_windows_scan_networks,
     probe_tcp_targets,
 )
+from .platform_adapter import get_platform_adapter
 
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 _startup_warnings = []
@@ -69,12 +71,15 @@ def ensure_persistent_adb_runtime(adb_path):
     return adb_path
 
 def get_adb_path():
-    adb_names = ["adb.exe"] if sys.platform == "win32" else ["adb"]
-    for name in adb_names:
-        path = bundled_resource_path("assets", "runtime", name)
-        if path:
-            return ensure_persistent_adb_runtime(path)
-    return "adb"
+    try:
+        return get_platform_adapter().get_bundled_adb_path()
+    except Exception:
+        adb_names = ["adb.exe"] if sys.platform == "win32" else ["adb"]
+        for name in adb_names:
+            path = bundled_resource_path("assets", "runtime", name)
+            if path:
+                return ensure_persistent_adb_runtime(path)
+        return "adb"
 
 
 ADB = get_adb_path()

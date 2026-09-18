@@ -20,6 +20,7 @@ from .core import (
     load_settings,
     update_settings,
 )
+from .platform_adapter import get_platform_adapter
 from .windows import query_windows_hdr_enabled
 
 _GAME_FEATURE_DEPENDENCIES = {
@@ -557,9 +558,14 @@ class DisplayFeaturesMixin:
 
     def _query_windows_hdr_state(self):
         try:
-            return query_windows_hdr_enabled(int(self.winId()))
+            handle = None
+            try:
+                handle = int(self.winId())
+            except Exception:
+                handle = None
+            return get_platform_adapter().get_hdr_state(handle)
         except Exception:
-            return query_windows_hdr_enabled()
+            return None
 
     def _poll_hdr_memory_state(self, reason="timer"):
         visible_interval = 3000

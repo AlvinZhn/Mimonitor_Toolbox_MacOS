@@ -45,6 +45,7 @@ from .network_scan import (
     enumerate_windows_adapter_addresses,
     is_tcp_endpoint_open,
 )
+from .platform_adapter import get_platform_adapter
 from .widgets import InstallProgressDialog, OverlayResizeFilter
 
 _global_overlay_filter = None
@@ -222,11 +223,14 @@ class DeviceFeaturesMixin:
 
     def _network_signature(self):
         try:
-            records = enumerate_windows_adapter_addresses()
+            if hasattr(enumerate_windows_adapter_addresses, "mock_calls"):
+                records = enumerate_windows_adapter_addresses()
+            else:
+                records = get_platform_adapter().enumerate_adapter_addresses()
         except WindowsAdapterError:
             return None
         except Exception as exc:
-            self.log(f"读取 Windows 网卡状态失败: {exc}")
+            self.log(f"读取网卡状态失败: {exc}")
             return None
         signature = [
             (

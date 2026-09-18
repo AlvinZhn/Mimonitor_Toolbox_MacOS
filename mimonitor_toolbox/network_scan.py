@@ -438,14 +438,28 @@ def enumerate_windows_adapter_addresses() -> list[RawAdapterAddress]:
     return records
 
 
+def get_scan_networks(
+    log: Optional[Callable[[str], None]] = None,
+    adapter_provider: Optional[Callable[[], list[RawAdapterAddress]]] = None,
+) -> list[ScanNetwork]:
+    """枚举并筛选所有适合扫描的物理局域网（自动适配当前操作系统）。"""
+
+    if adapter_provider:
+        provider = adapter_provider
+    else:
+        from .platform_adapter import get_platform_adapter
+
+        provider = get_platform_adapter().enumerate_adapter_addresses
+    return select_scan_networks(provider(), log=log)
+
+
 def get_windows_scan_networks(
     log: Optional[Callable[[str], None]] = None,
     adapter_provider: Optional[Callable[[], list[RawAdapterAddress]]] = None,
 ) -> list[ScanNetwork]:
-    """枚举并筛选所有适合扫描的 Windows 物理局域网。"""
+    """枚举并筛选所有适合扫描的 Windows 物理局域网（向后兼容别名）。"""
 
-    provider = adapter_provider or enumerate_windows_adapter_addresses
-    return select_scan_networks(provider(), log=log)
+    return get_scan_networks(log=log, adapter_provider=adapter_provider)
 
 
 def build_probe_targets(
