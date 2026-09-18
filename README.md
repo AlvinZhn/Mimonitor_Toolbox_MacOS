@@ -1,3 +1,19 @@
+# Mimonitor Toolbox (macOS 增强版 / 跨平台支持分支)
+
+> 本项目为基于原作者 [YiHoooong/Mimonitor_Toolbox](https://github.com/YiHoooong/Mimonitor_Toolbox) 的跨平台二次开发增强分支。在**完整保留原作者所有 Windows 核心功能、专家级参数调节与 HyperOS 通信协议**的基础上，彻底解耦 Windows 原生依赖，为 macOS 用户带来原汁原味的原生桌面体验，并构建了双层情景化交互架构与多端自动化发布流水线。
+
+### 🍎 macOS 专属增强特性：
+1. **原生 macOS 体验与免配 ADB**：内置已签名授权的 Mach-O 原生 ADB 运行时与辅助工具包，安装后开箱即用，零命令配置；
+2. **27U / 32U 机型自适应识别**：基于底层 `/proc/cmdline` 硬件特征动态探测屏幕规格，标题栏与功能逻辑自动感知（支持 Redmi G Pro 27U / 32U）；
+3. **新增【极简情景仪表盘】**：在专家设置前增设场景卡片，开箱即用“办公护眼”、“320Hz 电竞”、“影院 MiniLED”一键切换，并支持将当前精细调校“一键保存为新情景”；
+4. **macOS 菜单栏托盘直切**：遵循 macOS HIG 规范打造自适应深浅色线框托盘图标，右键菜单直接静默下发情景模式，免开主窗口秒级生效；
+5. **macOS 平台系统能力平替**：基于 Apple EDR 原生探测 HDR 状态联动控光、辅助功能降级快捷键、以及通过 AppleScript 原生终端一键进入显示器 ADB Shell。
+
+📦 **macOS 快速安装指引**：
+> macOS 用户请前往 [Releases 页面](../../releases) 下载最新版的 `Mimonitor-Toolbox-v*-macOS.dmg` 安装包，双击打开并将应用图标拖入 `Applications`（应用程序）文件夹即可直接运行。
+
+---
+
 # Mimonitor Toolbox
 
 Redmi G Pro 27U 2026显示器 ADB 控制工具
