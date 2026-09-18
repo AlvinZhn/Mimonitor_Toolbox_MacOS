@@ -61,6 +61,7 @@ def _load_settings_unlocked():
     }
     return merged
 
+APP_VERSION = "3.0.0"
 DEFAULT_APP_TITLE = "红米 G Pro 旗舰显示器控制台 (27U/32U)"
 
 def get_cached_model_title() -> str:

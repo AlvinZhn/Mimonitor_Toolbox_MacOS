@@ -9,3 +9,4 @@ __pycache__/
 *.Zone.Identifier
 .vscode/
 *.spec
+.DS_Store

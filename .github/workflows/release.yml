@@ -33,6 +33,20 @@ jobs:
           pip install -r requirements-build.txt
           pip install pyinstaller pytest
 
+      - name: Resolve Version
+        id: resolve_ver
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            RAW_VER="${{ github.ref_name }}"
+          elif [ -n "${{ inputs.tag_name }}" ]; then
+            RAW_VER="${{ inputs.tag_name }}"
+          else
+            RAW_VER="v3.0.0"
+          fi
+          CLEAN_VER="${RAW_VER#v}"
+          echo "VERSION=$CLEAN_VER" >> "$GITHUB_ENV"
+          echo "tag_ver=$RAW_VER" >> "$GITHUB_OUTPUT"
+
       - name: Run unit test gate
         env:
           QT_QPA_PLATFORM: offscreen
@@ -47,8 +61,20 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
-          path: dist/Mimonitor-Toolbox-macOS.dmg
+          path: dist/Mimonitor-Toolbox-*-macOS.dmg
           if-no-files-found: error
+
+      - name: Send Failure Alarm
+        if: failure()
+        env:
+          PUSH_WEBHOOK_URL: ${{ secrets.PUSH_WEBHOOK_URL }}
+        run: |
+          python .github/workflows/scripts/notify.py \
+            --event build_failure \
+            --job "macOS 构建与单测门禁" \
+            --commit "${{ github.sha }}" \
+            --ref "${{ github.ref_name }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
   build-windows:
     name: Build Windows Exe & Installer
@@ -151,11 +177,32 @@ jobs:
             dist-installer/MonitorToolbox-Setup.exe
           if-no-files-found: error
 
+      - name: Send Failure Alarm
+        if: failure()
+        shell: bash
+        env:
+          PUSH_WEBHOOK_URL: ${{ secrets.PUSH_WEBHOOK_URL }}
+        run: |
+          python .github/workflows/scripts/notify.py \
+            --event build_failure \
+            --job "Windows 构建与打包" \
+            --commit "${{ github.sha }}" \
+            --ref "${{ github.ref_name }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
   publish-release:
     name: Publish GitHub Release
     needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository for scripts
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -170,10 +217,35 @@ jobs:
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag_name }}
           files: |
-            release-assets/Mimonitor-Toolbox-macOS.dmg
+            release-assets/Mimonitor-Toolbox-*-macOS.dmg
             release-assets/MonitorToolbox.exe
             release-assets/MonitorToolbox-portable.zip
             release-assets/MonitorToolbox-Setup.exe
           generate_release_notes: true
           draft: false
           prerelease: false
+
+      - name: Send Release Success Notification
+        if: success()
+        env:
+          PUSH_WEBHOOK_URL: ${{ secrets.PUSH_WEBHOOK_URL }}
+        run: |
+          VER="${{ github.ref_type == 'tag' && github.ref_name || inputs.tag_name }}"
+          python .github/workflows/scripts/notify.py \
+            --event release_success \
+            --version "$VER" \
+            --commit "${{ github.sha }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --release-url "${{ github.server_url }}/${{ github.repository }}/releases/tag/$VER"
+
+      - name: Send Release Failure Alarm
+        if: failure()
+        env:
+          PUSH_WEBHOOK_URL: ${{ secrets.PUSH_WEBHOOK_URL }}
+        run: |
+          python .github/workflows/scripts/notify.py \
+            --event build_failure \
+            --job "Release 发布聚合任务" \
+            --commit "${{ github.sha }}" \
+            --ref "${{ github.ref_name }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

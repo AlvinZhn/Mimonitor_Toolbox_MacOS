@@ -20,6 +20,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Configure Git
         run: |
           git config --global user.name "github-actions[bot]"
@@ -35,10 +40,11 @@ jobs:
         run: |
           LOCAL_BRANCH=$(git branch --show-current || echo "master")
           BEHIND_COUNT=$(git rev-list --count HEAD..upstream/master || echo 0)
-          echo "behind_count=$BEHIND_COUNT" >> $GITHUB_OUTPUT
+          echo "behind_count=$BEHIND_COUNT" >> "$GITHUB_OUTPUT"
           echo "检测到上游领先提交数: $BEHIND_COUNT"
 
       - name: Create Sync Branch and Pull Request
+        id: create_pr
         if: steps.check_commits.outputs.behind_count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -46,22 +52,49 @@ jobs:
           SYNC_BRANCH="upstream-sync-$(date +%Y%m%d)"
           echo "创建同步分支: $SYNC_BRANCH"
           git checkout -b "$SYNC_BRANCH"
-          git merge upstream/master -m "chore(sync): 合并上游 master 分支最新提交" --no-edit || true
+          git merge upstream/master -m "chore(sync): 合并上游 master 分支最新提交" --no-edit
           git push origin "$SYNC_BRANCH" --force
-          
-          # 检查是否已存在同名 PR，若无则新建
+
+          cat << 'EOF' > pr_body.md
+          ### 🤖 上游同步机器人自动化检测提示
+
+          检测到原作者仓库 `YiHoooong/Mimonitor_Toolbox:master` 存在新的提交。
+
+          分支已自动抓取上游更新并完成初步合并，请人工审查代码差异与冲突解决后再合并至主分支。
+          EOF
+
           EXISTING_PR=$(gh pr list --head "$SYNC_BRANCH" --json number -q '.[0].number')
           if [ -z "$EXISTING_PR" ]; then
-            gh pr create \
+            PR_URL=$(gh pr create \
               --title "chore(sync): 检测到上游原作者新提交，请求同步更新" \
-              --body "### 🤖 上游同步机器人自动化检测提示
-
-检测到原作者仓库 \`YiHoooong/Mimonitor_Toolbox:master\` 存在新的提交（共 ${{ steps.check_commits.outputs.behind_count }} 个提交领先）。
-
-分支 \`$SYNC_BRANCH\` 已自动抓取上游更新并完成初步合并，请人工审查代码差异与冲突解决后再合并至主分支。" \
+              --body-file pr_body.md \
               --base master \
-              --head "$SYNC_BRANCH"
-            echo "已成功创建同步 Pull Request"
+              --head "$SYNC_BRANCH")
+            echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+            echo "已成功创建同步 Pull Request: $PR_URL"
           else
-            echo "已存在对应的 Pull Request (#$EXISTING_PR)，无需重复创建"
+            PR_URL="https://github.com/${{ github.repository }}/pull/${EXISTING_PR}"
+            echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+            echo "已存在对应的 Pull Request: $PR_URL"
           fi
+
+      - name: Send Upstream Sync Notification
+        if: success() && steps.check_commits.outputs.behind_count != '0'
+        env:
+          PUSH_WEBHOOK_URL: ${{ secrets.PUSH_WEBHOOK_URL }}
+        run: |
+          python .github/workflows/scripts/notify.py \
+            --event upstream_sync \
+            --pr-url "${{ steps.create_pr.outputs.pr_url }}" \
+            --behind-count "${{ steps.check_commits.outputs.behind_count }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Send Sync Failure Alarm
+        if: failure()
+        env:
+          PUSH_WEBHOOK_URL: ${{ secrets.PUSH_WEBHOOK_URL }}
+        run: |
+          python .github/workflows/scripts/notify.py \
+            --event sync_failure \
+            --error-msg "上游自动同步拉取或合并失败，可能存在代码冲突或依赖异常" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

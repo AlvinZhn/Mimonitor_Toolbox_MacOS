@@ -20,9 +20,22 @@ import time
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ASSETS_DIR = os.path.join(PROJECT_ROOT, "assets")
 DIST_DIR = os.path.join(PROJECT_ROOT, "dist")
+def get_project_version() -> str:
+    """动态获取项目版本号：优先读取环境变量 VERSION，回退读取 mimonitor_toolbox.core.APP_VERSION。"""
+    env_v = os.environ.get("VERSION", "").strip().lstrip("v")
+    if env_v:
+        return env_v
+    try:
+        from mimonitor_toolbox.core import APP_VERSION
+        return str(APP_VERSION).strip().lstrip("v")
+    except Exception:
+        return "3.0.0"
+
+
+VERSION = get_project_version()
 APP_NAME = "Mimonitor Toolbox"
 APP_BUNDLE_NAME = f"{APP_NAME}.app"
-DMG_NAME = "Mimonitor-Toolbox-macOS.dmg"
+DMG_NAME = f"Mimonitor-Toolbox-v{VERSION}-macOS.dmg"
 
 
 def log(msg: str):
@@ -171,8 +184,8 @@ def post_process_bundle():
     pl["CFBundleName"] = APP_NAME
     pl["CFBundleDisplayName"] = "红米 G Pro 监控工具箱"
     pl["CFBundleIdentifier"] = "com.mimonitor.toolbox"
-    pl["CFBundleVersion"] = "3.0.0"
-    pl["CFBundleShortVersionString"] = "3.0.0"
+    pl["CFBundleVersion"] = VERSION
+    pl["CFBundleShortVersionString"] = VERSION
     pl["NSHighResolutionCapable"] = True
     pl["NSRequiresAquaSystemAppearance"] = False
     pl["NSHumanReadableCopyright"] = "Copyright © 2026 Mimonitor Toolbox Authors"
