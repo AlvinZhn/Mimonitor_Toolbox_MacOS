@@ -280,6 +280,19 @@ class DashboardInterfaceTests(unittest.TestCase):
             dashboard.apply_preset("office_eyecare")
             self.assertTrue(mock_warn.called)
 
+    def test_main_window_focuses_dashboard_page_on_startup(self):
+        from mimonitor_toolbox.main_window import App
+
+        with mock.patch.object(App, "register_global_hotkeys"), \
+                mock.patch.object(App, "setup_tray"):
+            window = App()
+
+        self.assertTrue(hasattr(window, "dashboard_page"))
+        self.assertEqual(window.stackedWidget.currentWidget().objectName(), "dashboardPage")
+        window._cleanup_done = True
+        window.deleteLater()
+        self.app.processEvents()
+
 
 if __name__ == "__main__":
     unittest.main()
