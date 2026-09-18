@@ -92,6 +92,7 @@ class TestPhase26MultiThreadingWorker(unittest.TestCase):
 class TestPhase26MacOSWindowTrafficLights(unittest.TestCase):
     """P1: 验证 macOS 交通灯自绘按钮隐藏与安全留白。"""
 
+    @unittest.skipIf(sys.platform != "darwin", "仅在真实 macOS 宿主下测试窗口交通灯几何坐标")
     def test_macos_titlebar_buttons_hidden_and_margin_set(self):
         from mimonitor_toolbox.main_window import App
 
@@ -193,12 +194,13 @@ class TestPhase26BundledAdbPriority(unittest.TestCase):
 
     def test_bundled_adb_priority_and_chmod(self):
         adapter = MacOSAdapter()
-        real_darwin_adb = os.path.abspath("assets/runtime/darwin/adb")
+        real_darwin_adb = os.path.abspath(os.path.join("assets", "runtime", "darwin", "adb"))
 
         if os.path.exists(real_darwin_adb):
             res = adapter.get_bundled_adb_path()
-            self.assertEqual(res, real_darwin_adb)
-            self.assertTrue(os.access(real_darwin_adb, os.X_OK))
+            self.assertEqual(os.path.normpath(res), os.path.normpath(real_darwin_adb))
+            if sys.platform != "win32":
+                self.assertTrue(os.access(real_darwin_adb, os.X_OK))
 
 
 class TestPhase26DarkThemeDetection(unittest.TestCase):

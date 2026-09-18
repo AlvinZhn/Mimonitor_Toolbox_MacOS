@@ -150,6 +150,9 @@ class MacOSAdapterAdbPathTests(unittest.TestCase):
         self.adapter = MacOSAdapter()
 
     def test_prefers_bundled_darwin_adb_and_ensures_chmod_x(self):
+        if sys.platform == "win32":
+            self.skipTest("Windows 文件系统不具备 POSIX X_OK 权限位，跳过此测试")
+
         with tempfile.TemporaryDirectory() as temp_dir:
             darwin_dir = os.path.join(temp_dir, "assets", "runtime", "darwin")
             os.makedirs(darwin_dir, exist_ok=True)
@@ -172,8 +175,9 @@ class MacOSAdapterAdbPathTests(unittest.TestCase):
 
     def test_prefers_system_path_when_bundled_absent_and_which_adb_found(self):
         orig_exists = os.path.exists
+        darwin_adb_marker = os.path.join("darwin", "adb")
         with mock.patch("mimonitor_toolbox.core.bundled_resource_path", return_value=None), \
-             mock.patch("os.path.exists", side_effect=lambda p: False if "darwin/adb" in str(p) else orig_exists(p)), \
+             mock.patch("os.path.exists", side_effect=lambda p: False if (darwin_adb_marker in str(p) or "darwin/adb" in str(p).replace("\\", "/")) else orig_exists(p)), \
              mock.patch("shutil.which", return_value="/opt/homebrew/bin/adb"):
             self.assertEqual(self.adapter.get_bundled_adb_path(), "/opt/homebrew/bin/adb")
 
@@ -186,16 +190,17 @@ class MacOSAdapterAdbPathTests(unittest.TestCase):
     def test_prefers_user_cached_adb_when_present(self):
         user_adb = os.path.expanduser("~/.mimonitor_toolbox/bin/adb")
         orig_exists = os.path.exists
+        darwin_adb_marker = os.path.join("darwin", "adb")
         with mock.patch("shutil.which", return_value=None), mock.patch(
             "mimonitor_toolbox.core.bundled_resource_path",
             return_value=None,
         ), mock.patch(
             "os.path.exists",
-            side_effect=lambda p: (p == user_adb) if "darwin/adb" not in str(p) else False,
+            side_effect=lambda p: (os.path.normpath(str(p)) == os.path.normpath(str(user_adb))) if (darwin_adb_marker not in str(p) and "darwin/adb" not in str(p).replace("\\", "/")) else False,
         ), mock.patch(
             "os.access", return_value=True
         ):
-            self.assertEqual(self.adapter.get_bundled_adb_path(), user_adb)
+            self.assertEqual(os.path.normpath(self.adapter.get_bundled_adb_path()), os.path.normpath(user_adb))
 
     def test_returns_plain_adb_when_resource_does_not_exist(self):
         with mock.patch("shutil.which", return_value=None), mock.patch(
