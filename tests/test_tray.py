@@ -5,28 +5,45 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PyQt6.QtWidgets import QApplication
 
 from mimonitor_toolbox.main_window import App
-from mimonitor_toolbox.presets.manager import PresetProfile, get_preset_manager
+from mimonitor_toolbox.presets.manager import get_preset_manager
 
 
 class TestTrayFeatures(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.qapp = QApplication.instance() or QApplication([])
+        cls.qapp = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])
 
     def setUp(self):
-        with patch.object(App, "initialize_display_features", lambda self: None), \
-             patch.object(App, "register_global_hotkeys", lambda self: None), \
-             patch.object(App, "_auto_connect_on_startup", lambda self: None):
-            self.app = App()
+        # 全面屏蔽所有可能开辟线程或原生弹窗的后台逻辑
+        self._patchers = [
+            patch.object(App, "initialize_display_features", lambda self: None),
+            patch.object(App, "register_global_hotkeys", lambda self: None),
+            patch.object(App, "_auto_connect_on_startup", lambda self: None),
+            patch("PyQt6.QtCore.QTimer.singleShot", lambda *args, **kwargs: None),
+            patch("PyQt6.QtWidgets.QSystemTrayIcon.showMessage", MagicMock()),
+            patch("mimonitor_toolbox.dashboard.PresetApplyWorker.start", MagicMock()),
+        ]
+        for p in self._patchers:
+            p.start()
+
+        self.app = App()
+        # 停止所有后台轮询定时器，确保无头环境下绝对安全受控
+        for timer_name in ("adb_keepalive_timer", "adb_server_monitor_timer", "hdr_memory_timer"):
+            timer = getattr(self.app, timer_name, None)
+            if timer:
+                timer.stop()
 
     def tearDown(self):
         if hasattr(self, "app"):
-            self.app.close()
+            self.app.cleanup_before_exit()
+            self.app.deleteLater()
+        for p in reversed(self._patchers):
+            p.stop()
 
     def test_tray_icon_and_menu_created(self):
         """测试托盘图标与右键菜单是否正确创建并挂载。"""
@@ -53,12 +70,28 @@ class TestTrayFeatures(unittest.TestCase):
         self.assertTrue(any("320Hz电竞" in t and "●" not in t for t in action_texts))
 
     def test_apply_preset_from_tray_disconnected(self):
-        """测试未连接显示器时点击托盘情景能够安全捕获并弹出提示。"""
+        """测试未连接显示器时点击托盘情景能够安全拦截并弹出轻提示，严禁开辟线程或产生阻塞。"""
         self.app.adb_connected = False
-        with patch.object(self.app.tray_icon, "showMessage") as mock_msg:
+        with patch.object(self.app.tray_icon, "showMessage") as mock_msg, \
+             patch("mimonitor_toolbox.dashboard.PresetApplyWorker.start") as mock_worker_start:
             self.app._apply_preset_from_tray("office_eyecare")
             mock_msg.assert_called_once()
             self.assertIn("尚未连接显示器", mock_msg.call_args[0][1])
+            mock_worker_start.assert_not_called()
+
+    def test_apply_preset_from_tray_connected_dispatches_worker(self):
+        """测试已连接状态下点击情景会安全构建并启动 PresetApplyWorker，且线程 start 处于 Mock 拦截状态。"""
+        self.app.adb_connected = True
+        self.app.adb = MagicMock()
+        mgr = get_preset_manager()
+        mgr._is_applying = False
+
+        with patch.object(self.app.tray_icon, "showMessage") as mock_msg, \
+             patch("mimonitor_toolbox.dashboard.PresetApplyWorker.start") as mock_worker_start:
+            self.app._apply_preset_from_tray("office_eyecare")
+            mock_worker_start.assert_called_once()
+            mock_msg.assert_called_once()
+            self.assertIn("正在切换至", mock_msg.call_args[0][1])
 
     def test_apply_preset_from_tray_success_callback(self):
         """测试托盘下发完成回调后，同步刷新菜单与主窗口。"""

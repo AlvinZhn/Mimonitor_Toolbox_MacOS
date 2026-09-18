@@ -25,7 +25,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: python -m pip install -r requirements-build.txt
+        run: python -m pip install -r requirements-build.txt pytest pytest-timeout
 
       - name: Validate source
         shell: pwsh
@@ -35,7 +35,7 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m unittest discover -s tests -v
+        run: python -m pytest tests/ -v --timeout=15
 
   build:
     if: startsWith(github.ref, 'refs/tags/v')
