@@ -123,6 +123,9 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
         # Setup layout and components
         self.osd = OsdHud(self)
         self.setup_ui()
+        if hasattr(self, "dashboard_page"):
+            self.dashboard_page.preset_applied.connect(self._sync_ui_from_preset)
+            self.switchTo(self.dashboard_page)
         self.setup_tray()
         self.initialize_display_features()
         for warning in drain_startup_warnings():
@@ -762,6 +765,68 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
             self.status_label.setStyleSheet("color: #107c41; font-weight: bold; font-size: 14px;")
             
         self.setWindowTitle(f"红米 G Pro 27U Toolbox - {status_suffix}")
+        if hasattr(self, "dashboard_page"):
+            self.dashboard_page.sync_external_state(
+                current_settings=self._gather_current_settings(),
+                connected=getattr(self, "adb_connected", False),
+                ip=str(getattr(getattr(self, "adb", None), "ip", "") or ""),
+            )
+
+    def _gather_current_settings(self) -> dict:
+        """汇聚当前从显示器读取到或界面所呈现的核心画质参数。"""
+        settings = dict(getattr(self, "current_vals", {}))
+        for name, (slider, _) in getattr(self, "sliders", {}).items():
+            settings[name] = slider.value()
+        for sk, btns in getattr(self, "state_buttons", {}).items():
+            for val, btn in btns.items():
+                if btn.isChecked():
+                    settings[sk] = val
+                    break
+        return settings
+
+    def _sync_ui_from_preset(self, settings_map: dict):
+        """将情景模式参数同步刷新到专家设置界面的控件，通过 blockSignals 严防二次回流下发。"""
+        # 1. 刷新滑动条
+        for name in ("backlight", "contrast", "black_level", "saturation", "hue", "sharpness"):
+            if name in settings_map and name in self.sliders:
+                val = settings_map[name]
+                slider, label_widget = self.sliders[name]
+                self._sync_slider_value(slider, label_widget, val)
+
+        # 2. 刷新状态单选/切换按钮
+        for key in (
+            "picture_local_dimming",
+            "picture_color_temperature",
+            "tv_picture_advanced_video_color_space",
+            "picture_response_time",
+            "picture_dynamic_definition",
+            "mt_colorful_led_mode",
+            "game_refresh_rate",
+        ):
+            if key in settings_map and key in self.state_buttons:
+                active_val = settings_map[key]
+                for val, btn in self.state_buttons[key].items():
+                    self._highlight_btn(btn, str(active_val) == str(val))
+                if key == "picture_color_temperature":
+                    self._update_color_gain_visibility(active_val)
+
+        # 3. 画面模式
+        if "picture_mode" in settings_map:
+            self._highlight_mode(settings_map["picture_mode"])
+
+        # 4. 更新内部参数缓存池
+        if hasattr(self, "current_vals"):
+            self.current_vals.update(settings_map)
+        if hasattr(self, "values"):
+            self.values.update(settings_map)
+
+        # 5. 更新仪表盘摘要栏
+        if hasattr(self, "dashboard_page"):
+            self.dashboard_page.sync_external_state(
+                current_settings=self._gather_current_settings(),
+                connected=getattr(self, "adb_connected", False),
+                ip=str(getattr(getattr(self, "adb", None), "ip", "") or ""),
+            )
 
     def _show_message_box(self, mtype, title, text):
         w = MessageBox(title, text, self)

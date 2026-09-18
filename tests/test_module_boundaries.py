@@ -19,6 +19,9 @@ class ModuleBoundaryTests(unittest.TestCase):
             "device_features",
             "main_window",
             "app",
+            "platform_adapter",
+            "presets",
+            "dashboard",
         )
 
         for name in module_names:

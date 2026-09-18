@@ -52,11 +52,13 @@ from .core import (
     load_settings,
     update_settings,
 )
+from .dashboard import DashboardInterface
 from .widgets import PageScrollSlider
 
 
 class PagesMixin:
     def setup_ui(self):
+        self.dashboard_page = DashboardInterface(self)
         self.home_page = self._make_home_page()
         self.picture_page = self._make_picture_page()
         self.game_page = self._make_game_page()
@@ -65,6 +67,7 @@ class PagesMixin:
         self.tools_page = self._make_tools_page()
         self.remote_page = self._make_remote_page()
 
+        self.dashboard_page.setObjectName("dashboardPage")
         self.home_page.setObjectName("homePage")
         self.picture_page.setObjectName("picturePage")
         self.game_page.setObjectName("gamePage")
@@ -73,7 +76,11 @@ class PagesMixin:
         self.tools_page.setObjectName("toolsPage")
         self.remote_page.setObjectName("remotePage")
 
-        # Add routes
+        # 顶层首页：情景仪表盘
+        self.addSubInterface(self.dashboard_page, FIF.APPLICATION, "情景仪表盘")
+        self.navigationInterface.addSeparator()
+
+        # 高级/专家设置分组：完整保留原作者 1:1 页面与微调交互
         self.addSubInterface(self.home_page, FIF.HOME, "主页 & 连接")
         self.addSubInterface(self.picture_page, FIF.PALETTE, "画面设置")
         self.addSubInterface(self.game_page, FIF.GAME, "游戏模式")

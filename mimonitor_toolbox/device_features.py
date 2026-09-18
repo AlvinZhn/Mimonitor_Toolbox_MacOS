@@ -1306,6 +1306,13 @@ class DeviceFeaturesMixin:
         if callable(update_game_hint):
             update_game_hint()
 
+        if hasattr(self, "dashboard_page") and hasattr(self, "_gather_current_settings"):
+            self.dashboard_page.sync_external_state(
+                current_settings=self._gather_current_settings(),
+                connected=getattr(self, "adb_connected", False),
+                ip=str(getattr(getattr(self, "adb", None), "ip", "") or ""),
+            )
+
     def _apply_polled_jni_values(self, vals):
         self.current_vals.update(vals)
         if "g_disp__disp_back_light" in vals and "backlight" in self.sliders:
@@ -1319,6 +1326,13 @@ class DeviceFeaturesMixin:
                 active_val = vals[key]
                 for val, btn in self.state_buttons[key].items():
                     self._highlight_btn(btn, str(active_val) == str(val))
+
+        if hasattr(self, "dashboard_page") and hasattr(self, "_gather_current_settings"):
+            self.dashboard_page.sync_external_state(
+                current_settings=self._gather_current_settings(),
+                connected=getattr(self, "adb_connected", False),
+                ip=str(getattr(getattr(self, "adb", None), "ip", "") or ""),
+            )
 
     def _on_page_changed(self, index):
         page = self.stackedWidget.widget(index)
